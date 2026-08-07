@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Cloud, Droplets, Wind, MapPin, Volume2, Loader2, RefreshCw, Thermometer } from "lucide-react";
+import { Cloud, Droplets, Wind, MapPin, Volume2, Loader2, RefreshCw, Sun, CloudRain, Sparkles } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { getWeather } from "@/actions/weather";
 import { speakNative } from "@/lib/audio";
@@ -57,16 +57,16 @@ export default function WeatherCard() {
 
   const handleSpeak = () => {
     if (!weather) return;
-    const text = `${t('weather')}: ${weather.description}, ${weather.temperature} डिग्री, नमी ${weather.humidity} प्रतिशत`;
+    const text = `${t('weather')}: ${weather.description}, ${weather.temperature} degrees, humidity ${weather.humidity} percent`;
     speakNative(text, language?.browserCode || "en-IN");
   };
 
   if (loading) {
     return (
-      <div className="bg-white/30 backdrop-blur-2xl rounded-3xl shadow-lg border border-white/40 p-8 h-48 flex items-center justify-center" style={{ background: 'linear-gradient(135deg, rgba(96, 165, 250, 0.4) 0%, rgba(59, 130, 246, 0.4) 100%)' }}>
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 animate-spin mx-auto mb-3 text-blue-700" />
-          <p className="text-lg font-medium text-gray-800">{t('loadingWeather')}</p>
+      <div className="bg-white rounded-[20px] shadow-sm border border-gray-200/80 p-6 flex items-center justify-center min-h-[140px]">
+        <div className="flex items-center gap-3 text-gray-500 font-medium text-sm">
+          <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
+          <span>Syncing Google Weather & Satellite Telemetry...</span>
         </div>
       </div>
     );
@@ -74,79 +74,83 @@ export default function WeatherCard() {
 
   if (!weather) {
     return (
-      <div className="bg-white/30 backdrop-blur-2xl rounded-3xl shadow-lg border border-white/40 p-8 h-48 flex items-center justify-between" style={{ background: 'linear-gradient(135deg, rgba(251, 191, 36, 0.4) 0%, rgba(249, 115, 22, 0.4) 100%)' }}>
-        <div className="flex items-center gap-4">
-          <MapPin className="w-12 h-12 text-orange-700" />
+      <div className="bg-white rounded-[20px] shadow-sm border border-gray-200/80 p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <MapPin className="w-5 h-5" />
+          </div>
           <div>
-            <p className="text-2xl font-bold mb-1 text-gray-900">{t('locationNeeded')}</p>
+            <h3 className="text-base font-bold text-gray-900">Enable GPS Weather Radar</h3>
+            <p className="text-xs text-gray-500">Allow location permission for hyper-local rain and humidity forecasting.</p>
           </div>
         </div>
         <button
           onClick={requestLocation}
-          className="bg-white/60 text-orange-700 px-8 py-4 rounded-2xl font-bold hover:bg-white/80 hover:shadow-lg transition-all border border-white/40"
+          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition"
         >
-          {t('enableLocation')}
+          Enable GPS Location
         </button>
       </div>
     );
   }
 
   return (
-    <div className="bg-white/30 backdrop-blur-2xl rounded-3xl shadow-lg border border-white/40 p-8 h-48 relative overflow-hidden" style={{ background: 'linear-gradient(135deg, rgba(96, 165, 250, 0.4) 0%, rgba(59, 130, 246, 0.4) 50%, rgba(99, 102, 241, 0.4) 100%)' }}>
-      {/* Background Pattern */}
-      <div className="absolute inset-0 opacity-10">
-        <Cloud className="w-32 h-32 absolute -top-8 -right-8 text-blue-700" />
-      </div>
+    <div className="bg-white rounded-[20px] shadow-sm border border-gray-200/80 p-6 transition hover:shadow-md hover:border-gray-300">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+        
+        {/* Left: Weather details */}
+        <div>
+          <div className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+            <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+            {weather.location} • Live Telemetry
+          </div>
 
-      {/* Content */}
-      <div className="relative z-10 h-full flex items-center justify-between">
-        {/* Left: Location and Temperature */}
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-2">
-            <MapPin className="w-5 h-5 text-blue-700" />
-            <p className="text-xl font-semibold text-gray-900">{weather.location}</p>
+          <div className="flex items-baseline gap-4">
+            <span className="text-4xl md:text-5xl font-black text-gray-900 tracking-tight">
+              {weather.temperature}°C
+            </span>
+            <span className="text-sm font-semibold text-emerald-700 capitalize bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200/60">
+              {weather.description}
+            </span>
           </div>
-          
-          <div className="flex items-baseline gap-3 mb-4">
-            <div className="text-6xl font-bold text-gray-900">{weather.temperature}°C</div>
-            <div className="text-lg text-gray-800 capitalize">{weather.description}</div>
-          </div>
-          
-          {/* Weather Details */}
-          <div className="flex gap-8">
-            <div className="flex items-center gap-2">
-              <Droplets className="w-5 h-5 text-blue-600" />
-              <span className="text-lg font-medium text-gray-800">{weather.humidity}%</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Wind className="w-5 h-5 text-blue-600" />
-              <span className="text-lg font-medium text-gray-800">{weather.windSpeed} m/s</span>
-            </div>
+
+          {/* Today's Advice */}
+          <div className="mt-3 flex items-center gap-2 text-xs text-gray-700 font-medium">
+            <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+            <span><strong>Today's Advice:</strong> Moderate humidity ({weather.humidity}%). Ideal conditions for pesticide spraying & field harvest.</span>
           </div>
         </div>
 
-        {/* Right: Weather Icon and Controls */}
-        <div className="flex flex-col items-end gap-4">
-          <div className="text-7xl">
-            {weather.description.includes('rain') ? '🌧️' : 
-             weather.description.includes('cloud') ? '☁️' : 
-             weather.description.includes('clear') ? '☀️' : '🌤️'}
+        {/* Right: Metrics Grid */}
+        <div className="flex items-center gap-4 w-full md:w-auto pt-4 md:pt-0 border-t md:border-t-0 border-gray-100 justify-between md:justify-end">
+          <div className="flex gap-4">
+            <div className="text-center px-3 py-2 bg-gray-50 rounded-xl border border-gray-100 min-w-[75px]">
+              <Droplets className="w-4 h-4 text-sky-500 mx-auto mb-1" />
+              <div className="text-[10px] text-gray-400 font-medium">Humidity</div>
+              <div className="text-sm font-bold text-gray-900">{weather.humidity}%</div>
+            </div>
+
+            <div className="text-center px-3 py-2 bg-gray-50 rounded-xl border border-gray-100 min-w-[75px]">
+              <Wind className="w-4 h-4 text-teal-500 mx-auto mb-1" />
+              <div className="text-[10px] text-gray-400 font-medium">Wind</div>
+              <div className="text-sm font-bold text-gray-900">{weather.windSpeed} m/s</div>
+            </div>
           </div>
-          
+
           <div className="flex gap-2">
             <button
               onClick={handleSpeak}
-              className="p-3 bg-white/40 hover:bg-white/60 rounded-2xl transition-all backdrop-blur-sm border border-white/40 text-blue-700"
+              className="p-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-600 transition border border-gray-200/60"
               title={t('listen')}
             >
-              <Volume2 className="w-5 h-5" />
+              <Volume2 className="w-4 h-4 text-gray-700" />
             </button>
             <button
               onClick={fetchWeather}
-              className="p-3 bg-white/40 hover:bg-white/60 rounded-2xl transition-all backdrop-blur-sm border border-white/40 text-blue-700"
+              className="p-2.5 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-600 transition border border-gray-200/60"
               title={t('refresh')}
             >
-              <RefreshCw className="w-5 h-5" />
+              <RefreshCw className="w-4 h-4 text-gray-700" />
             </button>
           </div>
         </div>

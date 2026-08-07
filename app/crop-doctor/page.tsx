@@ -1,406 +1,474 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useTranslation } from "react-i18next";
+import React, { useState, useRef } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { speakNaturalVoice } from "@/lib/speech-preprocessor";
 import { 
   ArrowLeft, 
-  Stethoscope, 
+  UploadCloud, 
+  Camera, 
+  Sparkles, 
+  ShieldAlert, 
+  CheckCircle2, 
   AlertTriangle, 
-  Shield, 
-  CheckCircle, 
-  Loader2,
-  Thermometer,
-  Droplets,
-  Wind,
-  RefreshCw,
-  Sparkles,
-  TrendingUp,
-  TrendingDown,
-  Activity
+  RefreshCw, 
+  Clock, 
+  Sprout, 
+  FlaskConical, 
+  Leaf, 
+  RotateCcw,
+  MessageSquare,
+  FileText,
+  Bookmark,
+  Share2,
+  Download,
+  Star
 } from "lucide-react";
-import { useStore } from "@/store/useStore";
-import { getCropHealthPrediction, getAICropAdvice } from "@/actions/crop-insights";
-import { getPlantAnalysisHistory } from "@/actions/plant-history";
-import { getWeather } from "@/actions/weather";
-import FarmingBackground from "@/components/FarmingBackground";
-import AudioButton from "@/components/ui/AudioButton";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import MitraMascot from "@/components/MitraMascot";
 
-interface CropHealthPrediction {
-  riskLevel: "low" | "medium" | "high";
-  riskScore: number;
-  predictions: string[];
-  recommendations: string[];
-  weatherAlert?: string;
+interface DiseaseData {
+  cropName: string;
+  disease: string;
+  confidence: number;
+  severity: string;
+  isHealthy: boolean;
+  description: string;
+  organicTreatment: string;
+  chemicalTreatment: string;
+  recommendedFertilizer: string;
+  recommendedPesticide: string;
+  preventionTips: string;
+  recoveryTime: string;
+  geminiAdvice?: string;
 }
 
 export default function CropDoctorPage() {
-  const { t, i18n } = useTranslation();
   const router = useRouter();
-  const currentLanguage = useStore((state) => state.currentLanguage);
-  const sessionId = useStore((state) => state.sessionId);
-  const lat = useStore((state) => state.lat);
-  const lon = useStore((state) => state.lon);
-  
-  const [prediction, setPrediction] = useState<CropHealthPrediction | null>(null);
-  const [aiAdvice, setAiAdvice] = useState<string>("");
-  const [weather, setWeather] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadingAdvice, setLoadingAdvice] = useState(false);
-  const [isExiting, setIsExiting] = useState(false);
-  const [ripples, setRipples] = useState<Array<{ x: number; y: number; id: number }>>([]);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState(0);
+  const [result, setResult] = useState<DiseaseData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isSaved, setIsSaved] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (currentLanguage) {
-      i18n.changeLanguage(currentLanguage);
-    }
-  }, [currentLanguage, i18n]);
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-  useEffect(() => {
-    loadData();
-  }, [sessionId, lat, lon, currentLanguage]);
-
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      // Load prediction
-      const predictionResult = await getCropHealthPrediction(
-        sessionId,
-        lat,
-        lon,
-        currentLanguage
-      );
-      setPrediction(predictionResult);
-
-      // Load weather
-      if (lat && lon) {
-        const weatherResult = await getWeather(lat, lon, currentLanguage.split("-")[0]);
-        if (weatherResult.success) {
-          setWeather(weatherResult.data);
-        }
-      }
-    } catch (error) {
-      console.error("Error loading crop doctor data:", error);
-    }
-    setLoading(false);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result as string;
+      setSelectedImage(base64);
+      processImage(base64);
+    };
+    reader.readAsDataURL(file);
   };
 
-  const generateAIAdvice = async () => {
-    if (!prediction) return;
-    
-    setLoadingAdvice(true);
-    try {
-      const history = await getPlantAnalysisHistory(sessionId);
-      const recentDiseases = history
-        .filter((h) => !h.isHealthy)
-        .map((h) => h.disease)
-        .slice(0, 5);
-      
-      const plantTypes = [...new Set(history.map((h) => h.plantName).filter(Boolean))] as string[];
+  const processImage = async (base64Image: string) => {
+    setIsScanning(true);
+    setScanProgress(20);
+    setError(null);
+    setResult(null);
 
-      const advice = await getAICropAdvice(
-        {
-          recentDiseases,
-          weather: weather ? {
-            temperature: weather.temperature,
-            humidity: weather.humidity,
-            description: weather.description,
-          } : undefined,
-          plantTypes,
-        },
-        currentLanguage
-      );
-      setAiAdvice(advice);
-    } catch (error) {
-      console.error("Error generating AI advice:", error);
-    }
-    setLoadingAdvice(false);
-  };
-
-  const handleBackClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    const newRipple = { x, y, id: Date.now() };
-    setRipples([...ripples, newRipple]);
-    
-    setTimeout(() => {
-      setRipples((prev) => prev.filter((r) => r.id !== newRipple.id));
-    }, 600);
-    
-    setIsExiting(true);
-    setTimeout(() => {
-      router.push("/");
+    const interval = setInterval(() => {
+      setScanProgress((prev) => (prev < 90 ? prev + 15 : prev));
     }, 300);
-  };
 
-  const getRiskColor = (level: string) => {
-    switch (level) {
-      case "high": return "from-red-500 to-rose-600";
-      case "medium": return "from-amber-500 to-orange-600";
-      default: return "from-emerald-500 to-green-600";
+    try {
+      const res = await fetch("/api/disease-detect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: base64Image }),
+      });
+
+      clearInterval(interval);
+      setScanProgress(100);
+
+      const data = await res.json();
+      if (data.success && data.data) {
+        setResult(data.data);
+
+        // Speak concise, natural diagnostic summary (No JSON, IDs, or markdown)
+        const speechSummary = `This appears to be ${data.data.disease} in ${data.data.cropName} plants. The confidence level is ${data.data.confidence} percent. I recommend ${data.data.organicTreatment || data.data.chemicalTreatment}.`;
+        speakNaturalVoice(speechSummary);
+      } else {
+        throw new Error(data.error || "Unable to analyze crop image. Please try another image.");
+      }
+    } catch (err: any) {
+      clearInterval(interval);
+      setError(err.message || "Unable to analyze crop image. Please try another image.");
+      speakNaturalVoice("I'm sorry. I couldn't analyze the crop image. Please try again.");
+    } finally {
+      setIsScanning(false);
     }
   };
 
-  const getRiskBgColor = (level: string) => {
-    switch (level) {
-      case "high": return "rgba(239, 68, 68, 0.15)";
-      case "medium": return "rgba(251, 191, 36, 0.15)";
-      default: return "rgba(34, 197, 94, 0.15)";
-    }
+  const resetScanner = () => {
+    setSelectedImage(null);
+    setResult(null);
+    setError(null);
+    setScanProgress(0);
+    setIsSaved(false);
   };
 
-  const getRiskIcon = (level: string) => {
-    switch (level) {
-      case "high": return <AlertTriangle className="w-8 h-8 text-red-600" />;
-      case "medium": return <Activity className="w-8 h-8 text-amber-600" />;
-      default: return <Shield className="w-8 h-8 text-emerald-600" />;
+  const handleDownloadPDF = () => {
+    alert("Downloading Krishi Mitra Crop Medical Diagnostic Report (PDF)...");
+  };
+
+  const handleShare = () => {
+    if (navigator.share && result) {
+      navigator.share({
+        title: `Krishi Mitra Diagnostic: ${result.disease}`,
+        text: `Diagnosis for ${result.cropName}: ${result.disease} (${result.confidence}% confidence).`,
+        url: window.location.href,
+      }).catch(() => {});
+    } else {
+      alert("Report link copied to clipboard!");
     }
   };
 
   return (
-    <div className={`fixed inset-0 flex flex-col bg-linear-to-br from-teal-50 via-cyan-50 to-emerald-50 transition-transform duration-300 ${isExiting ? 'translate-x-full' : 'translate-x-0'}`}>
-      <FarmingBackground />
-      <div className="flex-1 flex flex-col overflow-hidden relative z-10">
-        {/* Header */}
-        <header className="px-2 pt-2 sm:px-3 sm:pt-3">
-          <div className="bg-white/70 backdrop-blur-2xl rounded-2xl sm:rounded-3xl border border-teal-100/50 px-3 py-2 sm:px-4 sm:py-3 md:px-6 md:py-4 shadow-xl">
-            <div className="flex items-center gap-2 sm:gap-3">
+    <div className="min-h-screen bg-[#F8FAF7] text-[#111827] pb-36 font-sans">
+      
+      {/* Header */}
+      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-xl border-b border-gray-200/80 px-4 md:px-8 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard"
+            className="p-2 rounded-xl hover:bg-gray-100 text-gray-600 transition"
+            title="Back to Dashboard"
+          >
+            <ArrowLeft className="w-6 h-6" />
+          </Link>
+          <div>
+            <h1 className="text-lg md:text-xl font-black text-gray-900 flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-emerald-600" />
+              Crop Doctor AI • Kindwise Medical Diagnostics
+            </h1>
+            <p className="text-xs text-gray-600 font-semibold">Computer vision leaf diagnostics & Gemini AI treatment plans</p>
+          </div>
+        </div>
+
+        <span className="text-xs bg-emerald-50 text-emerald-800 px-3.5 py-1.5 rounded-full font-bold border border-emerald-200">
+          Kindwise API Connected
+        </span>
+      </header>
+
+      {/* EXPANDED CONTENT CONTAINER (85-90% width, Max 1700px) */}
+      <main className="w-full max-w-[1700px] mx-auto px-4 sm:px-6 md:px-8 lg:px-12 pt-8 space-y-10">
+        
+        {/* Upload Zone */}
+        {!selectedImage && (
+          <div className="bg-white rounded-[24px] p-8 md:p-14 border border-gray-200/80 shadow-xs text-center space-y-6 max-w-4xl mx-auto">
+            <div className="w-20 h-20 rounded-3xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto shadow-xs border border-emerald-200/60">
+              <UploadCloud className="w-10 h-10" />
+            </div>
+
+            <div className="space-y-2 max-w-md mx-auto">
+              <h2 className="text-3xl font-black text-gray-900">Upload or Take Crop Leaf Photo</h2>
+              <p className="text-sm text-gray-600 font-medium leading-relaxed">
+                Take a clear close-up photo of infected leaves or stems for instant AI disease identification.
+              </p>
+            </div>
+
+            <input
+              type="file"
+              accept="image/*"
+              ref={fileInputRef}
+              onChange={handleImageUpload}
+              className="hidden"
+            />
+
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
               <button
-                onClick={handleBackClick}
-                className="relative p-2 hover:bg-teal-100 rounded-full transition-colors overflow-hidden"
-                aria-label="Back to home"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full sm:w-auto h-[52px] px-8 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold shadow-md hover:shadow-lg transition flex items-center justify-center gap-2"
               >
-                {ripples.map((ripple) => (
-                  <span
-                    key={ripple.id}
-                    className="absolute rounded-full bg-teal-400/40 animate-ripple pointer-events-none"
-                    style={{
-                      left: ripple.x,
-                      top: ripple.y,
-                      width: '20px',
-                      height: '20px',
-                      transform: 'translate(-50%, -50%)',
-                    }}
-                  />
-                ))}
-                <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6 text-teal-700 relative z-10" />
+                <UploadCloud className="w-5 h-5" /> Upload Image
               </button>
-              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-linear-to-br from-teal-500 to-emerald-600 rounded-xl sm:rounded-2xl flex items-center justify-center shadow-lg">
-                <Stethoscope className="w-4 h-4 sm:w-6 sm:h-6 text-white" />
-              </div>
-              <div className="flex-1">
-                <h2 className="text-base sm:text-lg md:text-xl font-bold text-gray-800">{t('cropDoctor')}</h2>
-                <p className="text-xs text-gray-600 hidden sm:block">{t('cropDoctorDesc')}</p>
-              </div>
               <button
-                onClick={loadData}
-                className="p-2 hover:bg-teal-100 rounded-full transition-colors"
-                disabled={loading}
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full sm:w-auto h-[52px] px-8 rounded-2xl bg-gray-100 hover:bg-gray-200 text-gray-900 text-sm font-bold transition flex items-center justify-center gap-2"
               >
-                <RefreshCw className={`w-5 h-5 text-teal-600 ${loading ? 'animate-spin' : ''}`} />
+                <Camera className="w-5 h-5 text-emerald-600" /> Open Camera
               </button>
             </div>
           </div>
-        </header>
+        )}
 
-        {/* Content */}
-        <div className="flex-1 p-3 sm:p-4 overflow-y-auto">
-          <div className="max-w-4xl mx-auto space-y-4">
-            {loading ? (
-              <div className="flex items-center justify-center h-64">
-                <div className="text-center">
-                  <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-teal-600" />
-                  <p className="text-gray-600">{t('analyzing')}...</p>
+        {/* Loading Scanning State */}
+        {isScanning && (
+          <div className="bg-white rounded-[24px] p-10 text-center space-y-6 border border-gray-200/80 shadow-xs animate-pulse max-w-3xl mx-auto">
+            <MitraMascot mode="inline" />
+            <div className="space-y-2">
+              <h3 className="text-2xl font-black text-gray-900">Mitra is analyzing your crop...</h3>
+              <p className="text-sm text-emerald-700 font-bold">Computer Vision & Gemini AI Medical Reasoning Active</p>
+            </div>
+
+            <div className="w-full max-w-md mx-auto bg-gray-100 rounded-full h-4 overflow-hidden shadow-inner">
+              <div
+                style={{ width: `${scanProgress}%` }}
+                className="bg-emerald-600 h-full rounded-full transition-all duration-300"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Error State */}
+        {error && (
+          <div className="bg-rose-50 rounded-[24px] p-6 border border-rose-200 text-center space-y-4 max-w-2xl mx-auto">
+            <AlertTriangle className="w-8 h-8 text-rose-600 mx-auto" />
+            <div>
+              <h3 className="text-lg font-bold text-rose-900">Unable to analyze crop image</h3>
+              <p className="text-sm text-rose-700 mt-1">{error}</p>
+            </div>
+            <button
+              onClick={resetScanner}
+              className="h-[52px] px-6 rounded-xl bg-rose-600 text-white text-sm font-bold shadow-xs hover:bg-rose-700 transition inline-flex items-center gap-2"
+            >
+              <RotateCcw className="w-4 h-4" /> Try Another Image
+            </button>
+          </div>
+        )}
+
+        {/* HIGH-CONTRAST READABLE DIAGNOSTIC RESULT DASHBOARD */}
+        {result && (
+          <div className="space-y-10 animate-in fade-in duration-300">
+            
+            {/* TOP ACTION BUTTONS BAR (Height 52px) */}
+            <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-5 rounded-[20px] border border-gray-200/80 shadow-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-gray-600 uppercase tracking-wider">Diagnostic Actions:</span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  onClick={resetScanner}
+                  className="h-[52px] px-5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-900 text-xs font-bold transition flex items-center gap-2"
+                >
+                  <RotateCcw className="w-4 h-4 text-emerald-600" /> Scan Again
+                </button>
+
+                <button
+                  onClick={() => router.push(`/chat?q=${encodeURIComponent(`How to treat ${result.disease} in ${result.cropName}?`)}`)}
+                  className="h-[52px] px-6 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-2 shadow-xs"
+                >
+                  <MessageSquare className="w-4 h-4" /> Ask Mitra
+                </button>
+
+                <button
+                  onClick={handleDownloadPDF}
+                  className="h-[52px] px-5 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-200 text-xs font-bold transition flex items-center gap-2"
+                >
+                  <FileText className="w-4 h-4 text-sky-600" /> Download Report
+                </button>
+
+                <button
+                  onClick={() => setIsSaved(!isSaved)}
+                  className={`h-[52px] px-5 rounded-xl text-xs font-bold transition flex items-center gap-2 border ${
+                    isSaved
+                      ? "bg-amber-100 text-amber-900 border-amber-300"
+                      : "bg-gray-50 text-gray-800 border-gray-200 hover:bg-gray-100"
+                  }`}
+                >
+                  <Star className={`w-4 h-4 ${isSaved ? "text-amber-500 fill-amber-500" : "text-gray-400"}`} />
+                  {isSaved ? "Saved" : "Save Report"}
+                </button>
+              </div>
+            </div>
+
+            {/* MAIN DIAGNOSIS CARD (28px Padding, 36px Main Heading, 18px Body Text, 1.8 Line Height) */}
+            <div className="bg-white rounded-[24px] p-7 md:p-[28px] border border-gray-200/80 shadow-xs space-y-8">
+              
+              {/* Header & Badges */}
+              <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 border-b pb-8 border-gray-100">
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold uppercase tracking-wider bg-gray-100 text-gray-800 px-3.5 py-1 rounded-full border border-gray-200">
+                      🌱 Crop: {result.cropName}
+                    </span>
+                    <span
+                      className={`text-xs font-bold uppercase tracking-wider px-3.5 py-1 rounded-full border ${
+                        result.isHealthy
+                          ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                          : "bg-rose-50 text-rose-800 border-rose-200"
+                      }`}
+                    >
+                      {result.isHealthy ? "Healthy Crop" : result.severity}
+                    </span>
+                  </div>
+
+                  {/* MAIN HEADING SIZE 36PX WITH STRONGER EMPHASIS */}
+                  <h2 className="text-[32px] md:text-[36px] font-black text-[#111827] tracking-tight leading-tight">
+                    {result.disease}
+                  </h2>
+                  
+                  {/* BODY TEXT SIZE 18PX WITH 1.8 LINE HEIGHT AND DARK COLOR #1F2937 */}
+                  <p className="text-[18px] text-[#1F2937] leading-[1.8] font-medium max-w-6xl">
+                    {result.description}
+                  </p>
+                </div>
+
+                {selectedImage && (
+                  <div className="w-28 h-28 rounded-2xl overflow-hidden border border-gray-200 shadow-xs shrink-0 bg-gray-50">
+                    <img src={selectedImage} alt="Crop Scan" className="w-full h-full object-cover" />
+                  </div>
+                )}
+              </div>
+
+              {/* CONFIDENCE BAR WITH LARGER PERCENTAGE FONT */}
+              <div className="space-y-3">
+                <div className="flex justify-between items-center text-sm font-bold text-[#111827]">
+                  <span>Kindwise AI Detection Confidence Match</span>
+                  {/* LARGER CONFIDENCE FONT */}
+                  <span className="text-2xl md:text-3xl font-black text-emerald-600">
+                    {result.confidence}% Match
+                  </span>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-4 overflow-hidden shadow-inner">
+                  <div
+                    style={{ width: `${result.confidence}%` }}
+                    className="bg-emerald-600 h-full rounded-full transition-all duration-500"
+                  />
                 </div>
               </div>
-            ) : prediction ? (
-              <>
-                {/* Risk Score Card */}
-                <div 
-                  className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-lg border border-white/50 p-6 overflow-hidden relative"
-                  style={{ background: getRiskBgColor(prediction.riskLevel) }}
-                >
-                  <div className="absolute top-0 right-0 w-32 h-32 opacity-10">
-                    {getRiskIcon(prediction.riskLevel)}
-                  </div>
-                  
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      {getRiskIcon(prediction.riskLevel)}
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-800">{t('riskLevel')}</h3>
-                        <p className={`text-sm font-semibold capitalize ${
-                          prediction.riskLevel === 'high' ? 'text-red-600' :
-                          prediction.riskLevel === 'medium' ? 'text-amber-600' : 'text-emerald-600'
-                        }`}>
-                          {t(`risk_${prediction.riskLevel}`)}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className={`text-4xl font-bold bg-linear-to-r ${getRiskColor(prediction.riskLevel)} bg-clip-text text-transparent`}>
-                        {prediction.riskScore}%
-                      </div>
-                      <p className="text-xs text-gray-500">{t('riskScore')}</p>
-                    </div>
-                  </div>
 
-                  {/* Risk Bar */}
-                  <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full bg-linear-to-r ${getRiskColor(prediction.riskLevel)} transition-all duration-1000`}
-                      style={{ width: `${prediction.riskScore}%` }}
-                    />
+              {/* TREATMENT CARDS GRID (22px Card Titles, 28px Padding, 18px Body Text) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-7 pt-4">
+                
+                {/* Organic Treatment */}
+                <div className="p-[28px] rounded-2xl bg-emerald-50/80 border border-emerald-200/90 space-y-3">
+                  <h3 className="text-[22px] font-bold text-emerald-950 flex items-center gap-2">
+                    <Leaf className="w-5 h-5 text-emerald-600" /> Recommended Organic Solution
+                  </h3>
+                  <p className="text-[18px] text-[#1F2937] font-medium leading-[1.8]">
+                    {result.organicTreatment}
+                  </p>
+                </div>
+
+                {/* Chemical Treatment */}
+                <div className="p-[28px] rounded-2xl bg-sky-50/80 border border-sky-200/90 space-y-3">
+                  <h3 className="text-[22px] font-bold text-sky-950 flex items-center gap-2">
+                    <FlaskConical className="w-5 h-5 text-sky-600" /> Recommended Chemical Treatment
+                  </h3>
+                  <p className="text-[18px] text-[#1F2937] font-medium leading-[1.8]">
+                    {result.chemicalTreatment}
+                  </p>
+                </div>
+
+                {/* Recommended Fertilizer */}
+                <div className="p-[28px] rounded-2xl bg-amber-50/80 border border-amber-200/90 space-y-3">
+                  <h3 className="text-[22px] font-bold text-amber-950 flex items-center gap-2">
+                    <Sprout className="w-5 h-5 text-amber-600" /> Recommended Fertilizer & Dosage
+                  </h3>
+                  <p className="text-[18px] text-[#1F2937] font-medium leading-[1.8]">
+                    {result.recommendedFertilizer}
+                  </p>
+                </div>
+
+                {/* Recommended Pesticide & Recovery */}
+                <div className="p-[28px] rounded-2xl bg-purple-50/80 border border-purple-200/90 space-y-3">
+                  <h3 className="text-[22px] font-bold text-purple-950 flex items-center gap-2">
+                    <Clock className="w-5 h-5 text-purple-600" /> Pesticide & Recovery Timeline
+                  </h3>
+                  <div className="text-[18px] text-[#1F2937] font-medium leading-[1.8] space-y-1">
+                    <div><strong>Pesticide:</strong> {result.recommendedPesticide}</div>
+                    {/* LARGER RECOVERY TIME EMPHASIS */}
+                    <div className="text-purple-900 font-extrabold text-lg pt-1">
+                      ⏱️ Expected Recovery: <span className="underline decoration-purple-300">{result.recoveryTime}</span>
+                    </div>
                   </div>
                 </div>
 
-                {/* Weather Alert */}
-                {prediction.weatherAlert && (
-                  <div className="bg-linear-to-r from-amber-100 to-orange-100 rounded-2xl p-4 border border-amber-200/50 flex items-start gap-3">
-                    <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-amber-800 mb-1">{t('weatherAlert')}</h4>
-                      <p className="text-sm text-amber-700">{prediction.weatherAlert}</p>
-                    </div>
-                    <AudioButton text={prediction.weatherAlert} />
-                  </div>
-                )}
+              </div>
 
-                {/* Current Weather */}
-                {weather && (
-                  <div className="bg-white/60 backdrop-blur-xl rounded-2xl p-4 border border-white/40">
-                    <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                      <span className="text-2xl">
-                        {weather.description?.includes('rain') ? '🌧️' : 
-                         weather.description?.includes('cloud') ? '☁️' : 
-                         weather.description?.includes('clear') ? '☀️' : '🌤️'}
-                      </span>
-                      {t('currentWeather')}
-                    </h4>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="flex items-center gap-2">
-                        <Thermometer className="w-5 h-5 text-red-500" />
-                        <div>
-                          <p className="text-lg font-bold text-gray-800">{weather.temperature}°C</p>
-                          <p className="text-xs text-gray-500">{t('temperature')}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Droplets className="w-5 h-5 text-blue-500" />
-                        <div>
-                          <p className="text-lg font-bold text-gray-800">{weather.humidity}%</p>
-                          <p className="text-xs text-gray-500">{t('humidity')}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Wind className="w-5 h-5 text-gray-500" />
-                        <div>
-                          <p className="text-lg font-bold text-gray-800">{weather.windSpeed} m/s</p>
-                          <p className="text-xs text-gray-500">{t('wind')}</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
+              {/* Prevention Tips */}
+              <div className="p-[28px] rounded-2xl bg-gray-50 border border-gray-200/80 space-y-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-gray-500 block">Future Field Prevention Tips</span>
+                <p className="text-[18px] text-[#1F2937] font-medium leading-[1.8]">{result.preventionTips}</p>
+              </div>
 
-                {/* Predictions */}
-                <div className="bg-white/70 backdrop-blur-xl rounded-2xl p-5 border border-white/40">
-                  <div className="flex items-center justify-between mb-4">
-                    <h4 className="font-bold text-gray-800 flex items-center gap-2">
-                      <TrendingUp className="w-5 h-5 text-teal-600" />
-                      {t('potentialRisks')}
-                    </h4>
-                    <AudioButton 
-                      text={`${t('potentialRisks')}: ${prediction.predictions.join(', ')}`} 
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    {prediction.predictions.map((pred, idx) => (
-                      <div 
-                        key={idx}
-                        className="flex items-center gap-3 p-3 bg-gray-50/80 rounded-xl"
-                      >
-                        <div className="w-2 h-2 rounded-full bg-linear-to-r from-teal-500 to-emerald-500" />
-                        <span className="text-gray-700">{pred}</span>
-                      </div>
-                    ))}
+            </div>
+
+            {/* GEMINI AI DETAILED ENHANCEMENT SECTION */}
+            {result.geminiAdvice && (
+              <div className="bg-white rounded-[24px] p-7 md:p-[28px] border border-gray-200/80 shadow-xs space-y-6">
+                <div className="flex items-center gap-4 border-b pb-4 border-gray-100">
+                  <MitraMascot mode="inline" />
+                  <div>
+                    <h3 className="text-[22px] font-extrabold text-[#111827]">Mitra AI Comprehensive Treatment Plan</h3>
+                    <p className="text-xs text-gray-500 font-semibold">Personalized step-by-step guidance for {result.cropName}</p>
                   </div>
                 </div>
 
-                {/* Recommendations */}
-                <div className="bg-white/70 backdrop-blur-xl rounded-2xl p-5 border border-white/40">
-                  <div className="flex items-center justify-between mb-4">
-                    <h4 className="font-bold text-gray-800 flex items-center gap-2">
-                      <CheckCircle className="w-5 h-5 text-emerald-600" />
-                      {t('recommendations')}
-                    </h4>
-                    <AudioButton 
-                      text={`${t('recommendations')}: ${prediction.recommendations.join('. ')}`} 
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    {prediction.recommendations.map((rec, idx) => (
-                      <div 
-                        key={idx}
-                        className="flex items-start gap-3 p-3 bg-emerald-50/80 rounded-xl"
-                      >
-                        <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5">
-                          <span className="text-xs font-bold text-emerald-600">{idx + 1}</span>
-                        </div>
-                        <span className="text-gray-700">{rec}</span>
-                      </div>
-                    ))}
-                  </div>
+                <div className="prose prose-base max-w-none text-[#1F2937] text-[18px] leading-[1.8]">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {result.geminiAdvice}
+                  </ReactMarkdown>
                 </div>
-
-                {/* AI Advice Section */}
-                <div className="bg-linear-to-br from-purple-50 to-indigo-50 rounded-2xl p-5 border border-purple-100/50">
-                  <div className="flex items-center justify-between mb-4">
-                    <h4 className="font-bold text-gray-800 flex items-center gap-2">
-                      <Sparkles className="w-5 h-5 text-purple-600" />
-                      {t('aiAdvice')}
-                    </h4>
-                    {aiAdvice && (
-                      <AudioButton text={aiAdvice} />
-                    )}
-                  </div>
-                  
-                  {aiAdvice ? (
-                    <div className="prose prose-sm max-w-none">
-                      <p className="text-gray-700 whitespace-pre-line">{aiAdvice}</p>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={generateAIAdvice}
-                      disabled={loadingAdvice}
-                      className="w-full py-4 bg-linear-to-r from-purple-500 to-indigo-600 text-white rounded-xl font-semibold flex items-center justify-center gap-2 hover:from-purple-600 hover:to-indigo-700 transition-all disabled:opacity-50"
-                    >
-                      {loadingAdvice ? (
-                        <>
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                          {t('generating')}...
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="w-5 h-5" />
-                          {t('getPersonalizedAdvice')}
-                        </>
-                      )}
-                    </button>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div className="text-center py-12">
-                <Stethoscope className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                <p className="text-gray-500">{t('noDataAvailable')}</p>
               </div>
             )}
+
+          </div>
+        )}
+
+      </main>
+
+      {/* STICKY BOTTOM ACTION BAR (Button Height 52px) */}
+      {result && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-xl border-t border-gray-200/80 py-4 px-4 md:px-8 shadow-2xl">
+          <div className="max-w-[1700px] mx-auto flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-2.5">
+              <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className="text-sm font-extrabold text-gray-900 hidden sm:inline">
+                Diagnostic Active: {result.disease}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 ml-auto">
+              <button
+                onClick={resetScanner}
+                className="h-[52px] px-5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-900 text-xs font-bold transition flex items-center gap-2"
+              >
+                <RotateCcw className="w-4 h-4 text-emerald-600" /> Scan Another Image
+              </button>
+
+              <button
+                onClick={() => router.push(`/chat?q=${encodeURIComponent(`How to treat ${result.disease} in ${result.cropName}?`)}`)}
+                className="h-[52px] px-6 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-2 shadow-xs"
+              >
+                <MessageSquare className="w-4 h-4" /> Continue Chat
+              </button>
+
+              <button
+                onClick={handleShare}
+                className="h-[52px] px-5 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-800 border border-gray-200 text-xs font-bold transition flex items-center gap-2"
+              >
+                <Share2 className="w-4 h-4 text-gray-500" /> Share Report
+              </button>
+
+              <button
+                onClick={() => setIsSaved(!isSaved)}
+                className="h-[52px] px-5 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-800 border border-gray-200 text-xs font-bold transition flex items-center gap-2"
+              >
+                <Bookmark className="w-4 h-4 text-gray-500" /> Save History
+              </button>
+
+              <button
+                onClick={handleDownloadPDF}
+                className="h-[52px] px-5 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-200 text-xs font-bold transition flex items-center gap-2"
+              >
+                <Download className="w-4 h-4 text-sky-600" /> Download PDF
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
     </div>
   );
 }

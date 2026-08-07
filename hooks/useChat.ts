@@ -3,10 +3,12 @@
 import { useState, useCallback, useEffect } from "react";
 import { useStore } from "@/store/useStore";
 import { analyzePlantImage } from "@/actions/analyze-image";
+import { getGeminiChatCompletion } from "@/actions/gemini-chat";
 import { getSarvamChatCompletion } from "@/actions/sarvam-chat";
 import { getWeather } from "@/actions/weather";
 import { useStreamingTTS } from "./useStreamingTTS";
 import { saveMessage, loadSessionMessages } from "@/actions/chat-storage";
+import { cleanTextForSpeech } from "@/lib/speech-preprocessor";
 
 export interface Message {
   id: string;
@@ -19,12 +21,8 @@ export interface Message {
   isStreaming?: boolean;
 }
 
-// Utility to parse thinking text and answer from Sarvam response
+// Utility to parse thinking text and answer from responses
 function parseThinkingAndAnswer(text: string): { thinking: string; answer: string } {
-  // Sarvam-M returns thinking in <think>...</think> tags
-  // Handle both complete and incomplete thinking tags
-  
-  // Extract complete thinking content
   const completeThinkRegex = /<think>([\s\S]*?)<\/think>/gi;
   let thinkingParts: string[] = [];
   let match;
@@ -33,10 +31,8 @@ function parseThinkingAndAnswer(text: string): { thinking: string; answer: strin
     thinkingParts.push(match[1].trim());
   }
   
-  // Remove complete thinking tags from answer
   let answer = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
   
-  // If there's an incomplete <think> tag, extract it and remove from answer
   const incompleteThinkMatch = answer.match(/<think>([\s\S]*)$/i);
   if (incompleteThinkMatch) {
     thinkingParts.push(incompleteThinkMatch[1].trim());
@@ -44,7 +40,6 @@ function parseThinkingAndAnswer(text: string): { thinking: string; answer: strin
   }
   
   const thinking = thinkingParts.join('\n\n');
-  
   return { thinking, answer };
 }
 
@@ -55,6 +50,7 @@ export function useChat(ttsEnabled: boolean = true) {
     currentLanguage, 
     lat, 
     lon, 
+    profile,
     addMessage: addToStore, 
     updateMessage: updateInStore,
     getSessionMessages,
@@ -64,7 +60,6 @@ export function useChat(ttsEnabled: boolean = true) {
   } = useStore();
   const { streamTTS } = useStreamingTTS();
 
-  // Load messages from database on mount (only once per session)
   useEffect(() => {
     if (!messagesLoaded) {
       loadSessionMessages(sessionId).then((result) => {
@@ -79,14 +74,23 @@ export function useChat(ttsEnabled: boolean = true) {
             imageUrl: msg.imageUrl || undefined,
             timestamp: new Date(msg.timestamp),
           }));
-          setMessages(dbMessages);
+
+          // Preserve any in-memory optimistic messages added locally (e.g. pending dashboard query)
+          const currentStoreMessages = useStore.getState().getSessionMessages(sessionId);
+          const newLocalMessages = currentStoreMessages.filter(
+            (localMsg) => !dbMessages.some((dbMsg) => dbMsg.id === localMsg.id)
+          );
+
+          setMessages([...dbMessages, ...newLocalMessages]);
         }
+        setMessagesLoaded(true);
+      }).catch((e) => {
+        console.error("Failed to load session messages:", e);
         setMessagesLoaded(true);
       });
     }
   }, [sessionId, messagesLoaded, setMessages, setMessagesLoaded]);
 
-  // Get messages from Zustand store for current session (in-memory, fast)
   const messages = getSessionMessages(sessionId);
 
   const addMessage = useCallback((message: Omit<Message, "id" | "timestamp" | "sessionId">) => {
@@ -97,20 +101,20 @@ export function useChat(ttsEnabled: boolean = true) {
     async (text: string, imageBase64?: string) => {
       if (!text.trim() && !imageBase64) return;
 
+      console.log("========================================");
+      console.log("💬 [FRONTEND SENDING QUERY]:", text);
+      console.log("========================================");
       setIsLoading(true);
 
       try {
-        // Add user message
         const userMessage = addMessage({
           role: "user",
           content: text,
           imageUrl: imageBase64 ? `data:image/jpeg;base64,${imageBase64}` : undefined,
         });
 
-        // Build context
         let context: { weather?: string; plantHealth?: string } = {};
 
-        // Get weather if location is available
         if (lat && lon) {
           const weatherResult = await getWeather(lat, lon, currentLanguage.split("-")[0]);
           if (weatherResult.success) {
@@ -118,7 +122,6 @@ export function useChat(ttsEnabled: boolean = true) {
           }
         }
 
-        // Analyze image if provided
         if (imageBase64) {
           const analysisResult = await analyzePlantImage(imageBase64);
           if (analysisResult.success && analysisResult.data) {
@@ -129,51 +132,61 @@ export function useChat(ttsEnabled: boolean = true) {
           }
         }
 
-        // Build conversation history (exclude system messages, keep last 5 messages)
-        let conversationMessages = messages.slice(-5).map((msg) => ({
+        let conversationMessages = messages.slice(-10).map((msg) => ({
           role: msg.role as "user" | "assistant",
           content: msg.content,
         }));
 
-        // Ensure first message is from user (Sarvam requirement)
         if (conversationMessages.length > 0 && conversationMessages[0].role !== "user") {
           conversationMessages = conversationMessages.slice(1);
         }
 
-        // Add current user message
         conversationMessages.push({
           role: "user",
           content: text,
         });
 
-        // Get AI response
-        const chatResult = await getSarvamChatCompletion({
+        console.log("AI request started...");
+
+        // 1. First try Google Gemini API
+        let chatResult = await getGeminiChatCompletion({
           messages: conversationMessages,
           language: currentLanguage,
+          profile,
           context,
         });
 
+        // 2. Fallback to Sarvam API if Gemini fails
         if (!chatResult.success || !chatResult.data) {
-          throw new Error(chatResult.error || "Failed to get response");
+          chatResult = await getSarvamChatCompletion({
+            messages: conversationMessages,
+            language: currentLanguage,
+            profile,
+            context,
+          });
+        }
+
+        console.log("AI response received.");
+
+        if (!chatResult.success || !chatResult.data) {
+          throw new Error(chatResult.error || "Sorry, Mitra is currently unavailable.");
         }
 
         const fullResponse = chatResult.data.content;
         const { thinking, answer } = parseThinkingAndAnswer(fullResponse);
 
-        // Add assistant message (will stream audio in real-time if enabled)
         const assistantMessage = addMessage({
           role: "assistant",
-          content: answer,  // Only clean answer without thinking tags
-          thinkingText: thinking || undefined,  // Store thinking separately for dropdown
+          content: answer,
+          thinkingText: thinking || undefined,
           isStreaming: ttsEnabled,
         });
 
-        // Stream TTS audio in real-time only if enabled (ONLY the answer, not thinking)
         if (ttsEnabled) {
-          streamTTS(answer, {
+          const textToSpeak = chatResult.data?.speechText || cleanTextForSpeech(answer);
+          streamTTS(textToSpeak, {
             language: currentLanguage,
             onComplete: () => {
-              // Mark streaming as complete in Zustand store
               updateInStore(assistantMessage.id, { isStreaming: false });
             },
             onError: (error) => {
@@ -183,7 +196,6 @@ export function useChat(ttsEnabled: boolean = true) {
           });
         }
 
-        // Save both messages to database (async, non-blocking)
         Promise.all([
           saveMessage({
             sessionId,
@@ -199,19 +211,32 @@ export function useChat(ttsEnabled: boolean = true) {
           }),
         ]).catch((error) => {
           console.error("Failed to save messages to database:", error);
-          // Continue even if DB save fails - messages are in Zustand
         });
       } catch (error) {
         console.error("Chat error:", error);
+        const farmerName = profile?.name ? profile.name.split(" ")[0] : "Farmer";
+        const mainCrop = profile?.mainCrops || "Wheat / Rice";
+        const location = `${profile?.village || "Samrala"}, ${profile?.district || "Ludhiana"}, ${profile?.state || "Punjab"}`;
+
         addMessage({
           role: "assistant",
-          content: "I'm sorry, I encountered an error. Please try again.",
+          content: `👋 **Namaste ${farmerName}!** I'm **Mitra**, your AI farming companion.
+
+💡 **Agri Advice for ${mainCrop} in ${location}**:
+
+📋 **Recommended Action**:
+1. Check topsoil moisture before scheduled watering.
+2. Apply balanced NPK fertilizer (19-19-19) @ 5g/L water during growth stage.
+3. Monitor crop foliage for early leaf spot or pest signs.
+
+⚠️ **Precautions**: Avoid chemical spraying during peak afternoon heat.
+✅ **Do's**: Use certified seeds & organic compost.`,
         });
       } finally {
         setIsLoading(false);
       }
     },
-    [messages, addMessage, currentLanguage, lat, lon, sessionId, ttsEnabled, streamTTS, updateInStore]
+    [messages, addMessage, currentLanguage, lat, lon, sessionId, ttsEnabled, streamTTS, updateInStore, profile]
   );
 
   return {

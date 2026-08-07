@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef } from "react";
+import { speakNaturalVoice } from "@/lib/speech-preprocessor";
 
 interface StreamingTTSConfig {
   language: string;
@@ -76,7 +77,7 @@ export function useStreamingTTS() {
         // Reset audio timing
         nextPlayTimeRef.current = 0;
 
-        // Use server-side API route instead of direct WebSocket
+        // Use server-side API route
         const response = await fetch("/api/tts-stream", {
           method: "POST",
           headers: {
@@ -88,24 +89,21 @@ export function useStreamingTTS() {
           }),
         });
 
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || "TTS API error");
+        if (response.ok) {
+          const data = await response.json();
+          if (data.audioBase64) {
+            await playAudioChunk(data.audioBase64);
+            config.onAudioChunk?.(data.audioBase64);
+            config.onComplete?.();
+            return;
+          }
         }
-
-        const data = await response.json();
         
-        if (data.audioBase64) {
-          // Play the audio immediately
-          await playAudioChunk(data.audioBase64);
-          config.onAudioChunk?.(data.audioBase64);
-          config.onComplete?.();
-        } else {
-          throw new Error("No audio received");
-        }
+        // Fallback to warm target language Web Speech Synthesis
+        speakNaturalVoice(text, config.language, config.onComplete);
       } catch (error) {
-        console.error("Streaming TTS error:", error);
-        config.onError?.(error instanceof Error ? error.message : "Failed to stream TTS");
+        console.warn("Server TTS fallback, using browser speech synthesis:", error);
+        speakNaturalVoice(text, config.language, config.onComplete);
       }
     },
     [playAudioChunk]

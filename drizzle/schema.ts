@@ -33,3 +33,18 @@ export const plantAnalysisHistory = pgTable("plant_analysis_history", {
   isHealthy: text("is_healthy").notNull(), // stored as 'true' or 'false'
   timestamp: timestamp("timestamp").defaultNow().notNull(),
 });
+
+export const farmerProfiles = pgTable("farmer_profiles", {
+  sessionId: text("session_id").primaryKey(),
+  name: text("name"),
+  state: text("state"),
+  district: text("district"),
+  village: text("village"),
+  preferredLanguage: text("preferred_language").default("en-IN"),
+  farmSize: text("farm_size"),
+  soilType: text("soil_type"),
+  mainCrops: text("main_crops"),
+  irrigationType: text("irrigation_type"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+

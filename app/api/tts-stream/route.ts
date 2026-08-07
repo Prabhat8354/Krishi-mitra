@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { cleanTextForSpeech } from "@/lib/speech-preprocessor";
 
 export const runtime = "edge";
 
@@ -30,7 +31,17 @@ export async function POST(req: NextRequest) {
 
     const languageCode = LANGUAGE_MAP[language] || "en-IN";
 
-    // Use REST API instead of WebSocket for reliability
+    // Clean raw text into natural spoken sentences
+    const spokenText = cleanTextForSpeech(text);
+
+    if (!spokenText) {
+      return new Response(
+        JSON.stringify({ error: "No printable text to speak" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    // Call Sarvam TTS with pace 0.95 for warm, friendly speaking speed
     const response = await fetch("https://api.sarvam.ai/text-to-speech", {
       method: "POST",
       headers: {
@@ -38,11 +49,11 @@ export async function POST(req: NextRequest) {
         "api-subscription-key": apiKey,
       },
       body: JSON.stringify({
-        text: text,
+        text: spokenText,
         target_language_code: languageCode,
         speaker: "anushka",
         pitch: 0,
-        pace: 1.0,
+        pace: 0.95,
         loudness: 1.5,
         speech_sample_rate: 22050,
         enable_preprocessing: true,

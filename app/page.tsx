@@ -1,36 +1,32 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useStore } from "@/store/useStore";
-import LanguageSelector from "@/components/LanguageSelector";
-import Dashboard from "@/components/Dashboard";
+import { useRouter } from "next/navigation";
+import SplashScreen from "@/components/SplashScreen";
+import { useAuth } from "@/context/AuthContext";
 
 export default function Home() {
-  const currentLanguage = useStore((state) => state.currentLanguage);
-  const languageSelected = useStore((state) => state.languageSelected);
-  const [mounted, setMounted] = useState(false);
+  const router = useRouter();
+  const { checkAuth } = useAuth();
 
-  // Handle hydration
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const handleSplashComplete = async () => {
+    const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
-  if (!mounted) {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-green-50 to-green-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-green-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
+    // DEMO MODE BEHAVIOR:
+    // If DEMO_MODE=true: ALWAYS route to /login after splash screen for presentation flow
+    if (isDemoMode) {
+      router.push("/login");
+      return;
+    }
 
-  // Show language selector if no language is selected yet
-  if (!languageSelected || !currentLanguage) {
-    return <LanguageSelector />;
-  }
+    // PRODUCTION MODE BEHAVIOR:
+    // If DEMO_MODE=false: Auto-redirect authenticated users directly to /dashboard
+    const authenticated = await checkAuth();
+    if (authenticated) {
+      router.push("/dashboard");
+    } else {
+      router.push("/login");
+    }
+  };
 
-  // Show dashboard with all features
-  return <Dashboard />;
+  return <SplashScreen onComplete={handleSplashComplete} durationMs={2800} />;
 }

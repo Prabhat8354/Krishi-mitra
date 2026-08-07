@@ -1,34 +1,60 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "next/navigation";
-import { Mic, MicOff, Send, ArrowLeft, Volume2, Copy, Check, ChevronDown, ChevronUp, Brain, Square } from "lucide-react";
+import { Mic, MicOff, Send, ArrowLeft, Volume2, Copy, Check, ChevronDown, ChevronUp, Brain, Square, AlertCircle, Sparkles, RefreshCw, Terminal } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition";
 import { useStore } from "@/store/useStore";
 import { getLanguageByCode } from "@/lib/languages";
 import { useChat } from "@/hooks/useChat";
 import { useStreamingTTS } from "@/hooks/useStreamingTTS";
+import { speakNaturalVoice } from "@/lib/speech-preprocessor";
+
+type VoiceState = "Ready" | "Listening" | "Processing" | "Speaking" | "Error";
 
 export default function VoicePage() {
   const { t, i18n } = useTranslation();
   const router = useRouter();
   const currentLanguage = useStore((state) => state.currentLanguage);
-  const language = getLanguageByCode(currentLanguage);
-  const { transcript, listening, resetTranscript, browserSupportsSpeechRecognition } = useSpeechRecognition();
+  const langObj = getLanguageByCode(currentLanguage);
+
+  const [voiceState, setVoiceState] = useState<VoiceState>("Ready");
   const [localText, setLocalText] = useState("");
-  const [isManuallyEditing, setIsManuallyEditing] = useState(false);
+  const [interimText, setInterimText] = useState("");
+  const [browserWarning, setBrowserWarning] = useState<string | null>(null);
+  const [micPermissionStatus, setMicPermissionStatus] = useState<"granted" | "denied" | "prompt">("prompt");
+  const [lastErrorCode, setLastErrorCode] = useState<string | null>(null);
+  const [hasRetriedOnce, setHasRetriedOnce] = useState(false);
+  const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
+
   const { messages, isLoading, sendMessage } = useChat();
   const { stopStreaming } = useStreamingTTS();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [autoScroll, setAutoScroll] = useState(true);
-  const [isExiting, setIsExiting] = useState(false);
-  const [ripples, setRipples] = useState<Array<{ x: number; y: number; id: number }>>([]);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
+  
+  // Single-instance recognition refs
+  const recognitionRef = useRef<any>(null);
+  const isRecognitionRunningRef = useRef<boolean>(false);
+  const isSupportedRef = useRef<boolean>(true);
+
+  // Status message based on current language & state
+  const statusMessage = useMemo(() => {
+    const isEnglish = currentLanguage.startsWith("en");
+    switch (voiceState) {
+      case "Listening":
+        return isEnglish ? "🎤 Listening to your voice..." : "🎤 आपकी आवाज़ सुन रहा हूँ...";
+      case "Processing":
+        return isEnglish ? "⚡ Processing with Agricultural AI..." : "⚡ कृषि एआई से जवाब तैयार किया जा रहा है...";
+      case "Speaking":
+        return isEnglish ? "🔊 Speaking AI recommendation..." : "🔊 सलाह बोलकर सुनाई जा रही है...";
+      case "Error":
+        return isEnglish ? "⚠️ Microphone / Voice Service Notice" : "⚠️ माइक अथवा वॉइस सेवा सूचना";
+      default:
+        return isEnglish ? "Tap microphone to speak in " + langObj.name : "बोलने के लिए माइक दबाएं (" + langObj.name + ")";
+    }
+  }, [voiceState, currentLanguage, langObj]);
 
   useEffect(() => {
     if (currentLanguage) {
@@ -36,332 +62,421 @@ export default function VoicePage() {
     }
   }, [currentLanguage, i18n]);
 
+  // Initial Browser Support Check
   useEffect(() => {
-    if (transcript && !isManuallyEditing) {
-      setLocalText(transcript);
-    }
-  }, [transcript, isManuallyEditing]);
+    if (typeof window !== "undefined") {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      isSupportedRef.current = !!SpeechRecognition;
 
-  // Auto-scroll when new messages arrive
+      console.log("========================================");
+      console.log("🎙️ [SPEECH RECOGNITION AUDIT DIAGNOSTICS]");
+      console.log("🌐 User-Agent:", navigator.userAgent);
+      console.log("⚡ SpeechRecognition API Supported:", isSupportedRef.current);
+      console.log("🌐 Selected Language:", currentLanguage || "en-IN");
+      console.log("========================================");
+
+      if (!isSupportedRef.current) {
+        setBrowserWarning("Voice recognition is not supported in this browser.");
+      }
+    }
+  }, [currentLanguage]);
+
+  // Stop STT & TTS cleanly on unmount
   useEffect(() => {
-    if (autoScroll && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch (e) {}
+        isRecognitionRunningRef.current = false;
+      }
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  const stopListening = useCallback(() => {
+    console.log("🎙️ Recognition ended / stopping instance...");
+    if (recognitionRef.current && isRecognitionRunningRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {
+        try {
+          recognitionRef.current.abort();
+        } catch (err) {}
+      }
     }
-  }, [messages, autoScroll]);
+    isRecognitionRunningRef.current = false;
+    setVoiceState("Ready");
+  }, []);
 
-  // Detect manual scrolling
-  const handleScroll = () => {
-    if (!scrollContainerRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
-    setAutoScroll(isAtBottom);
-  };
+  const handleSend = useCallback(async (textToSend?: string) => {
+    const query = textToSend || localText;
+    if (!query.trim()) return;
 
-  const handleMicToggle = () => {
-    if (!browserSupportsSpeechRecognition) {
-      alert(t('browserNotSupported'));
+    if (isRecognitionRunningRef.current) {
+      stopListening();
+    }
+
+    setVoiceState("Processing");
+    setLocalText("");
+    setInterimText("");
+
+    try {
+      await sendMessage(query);
+      setVoiceState("Speaking");
+    } catch (e) {
+      console.error("Error sending voice prompt:", e);
+      setVoiceState("Error");
+    } finally {
+      setTimeout(() => setVoiceState("Ready"), 4000);
+    }
+  }, [localText, stopListening, sendMessage, currentLanguage]);
+
+  const startListening = useCallback(async (isRetry = false) => {
+    setBrowserWarning(null);
+
+    if (typeof window === "undefined") return;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setBrowserWarning("Voice recognition is not supported in this browser.");
+      setMicPermissionStatus("denied");
       return;
     }
 
-    if (listening) {
-      SpeechRecognition.stopListening();
-    } else {
-      resetTranscript();
-      setLocalText("");
-      SpeechRecognition.startListening({
-        continuous: true,
-        language: language?.browserCode || "en-IN",
-      });
+    // Single Active Recognition Instance Guard: Stop any previous running instance
+    if (isRecognitionRunningRef.current) {
+      console.warn("⚠️ SpeechRecognition is already running. Stopping previous instance before starting new.");
+      stopListening();
     }
-  };
 
-  const handleSend = () => {
-    if (localText.trim()) {
-      sendMessage(localText);
-      setLocalText("");
-      resetTranscript();
-      if (listening) {
-        SpeechRecognition.stopListening();
-      }
-    }
-  };
-
-  const handleCopy = async (text: string, id: string) => {
+    // Step 1: Request Microphone Permission via navigator.mediaDevices.getUserMedia
     try {
-      await navigator.clipboard.writeText(text);
-      setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2000);
-    } catch (error) {
-      console.error("Failed to copy:", error);
+      console.log("🎙️ Requesting microphone access (navigator.mediaDevices.getUserMedia)...");
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log("✅ Microphone permission granted.");
+      setMicPermissionStatus("granted");
+      stream.getTracks().forEach((track) => track.stop()); // Free hardware for SpeechRecognition
+    } catch (err: any) {
+      console.error("❌ Microphone permission denied or audio capture failed:", err);
+      setMicPermissionStatus("denied");
+      setVoiceState("Error");
+      setBrowserWarning("Microphone permission denied. Please allow microphone access.");
+      return;
+    }
+
+    // Step 2: Initialize SpeechRecognition Instance with Required Configuration
+    try {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch (e) {}
+      }
+
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+      recognition.lang = currentLanguage || "en-IN"; // Synchronized with selected language
+
+      // IMPLEMENT ALL REQUIRED RECOGNITION CALLBACKS WITH FULL DEBUG LOGGING
+      recognition.onstart = () => {
+        isRecognitionRunningRef.current = true;
+        setLastErrorCode(null);
+        setVoiceState("Listening");
+        setLocalText("");
+        setInterimText("");
+        console.log("Speech started");
+        console.log("Listening...");
+        speakNaturalVoice(langObj.voiceCues.listening, currentLanguage);
+      };
+
+      recognition.onaudiostart = () => {
+        console.log("🎙️ Callback: onaudiostart (Audio input started)");
+      };
+
+      recognition.onspeechstart = () => {
+        console.log("🎙️ Callback: onspeechstart (User began speaking)");
+      };
+
+      recognition.onresult = (event: any) => {
+        let interim = "";
+        let final = "";
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            final += event.results[i][0].transcript;
+          } else {
+            interim += event.results[i][0].transcript;
+          }
+        }
+
+        if (interim) {
+          console.log("Transcript:", interim);
+          setInterimText(interim);
+        }
+
+        if (final) {
+          console.log("Transcript:", final);
+          setLocalText(final);
+          setInterimText("");
+          // Automatically send recognized speech to AI
+          handleSend(final);
+        }
+      };
+
+      recognition.onspeechend = () => {
+        console.log("🎙️ Callback: onspeechend (User stopped speaking)");
+      };
+
+      recognition.onaudioend = () => {
+        console.log("🎙️ Callback: onaudioend (Audio capture ended)");
+      };
+
+      recognition.onend = () => {
+        isRecognitionRunningRef.current = false;
+        console.log("Recognition ended");
+        setInterimText("");
+      };
+
+      recognition.onnomatch = () => {
+        console.log("🎙️ Callback: onnomatch (No speech matched)");
+      };
+
+      recognition.onerror = (event: any) => {
+        isRecognitionRunningRef.current = false;
+        const errCode = event.error || "unknown";
+        setLastErrorCode(errCode);
+        console.log("Error:", errCode);
+
+        // Handle specific error codes
+        switch (errCode) {
+          case "not-allowed":
+          case "service-not-allowed":
+            setMicPermissionStatus("denied");
+            setVoiceState("Error");
+            setBrowserWarning("Microphone permission denied. Please allow microphone access.");
+            break;
+          case "network":
+          case "no-speech":
+            if (!isRetry && !hasRetriedOnce) {
+              console.log("🔄 Retrying speech recognition once automatically...");
+              setHasRetriedOnce(true);
+              setTimeout(() => startListening(true), 600);
+            } else {
+              setVoiceState("Error");
+              setBrowserWarning("Couldn't recognize your speech. Please try again.");
+              setHasRetriedOnce(false);
+            }
+            break;
+          case "audio-capture":
+            setVoiceState("Error");
+            setBrowserWarning("No microphone hardware detected. Please attach a microphone.");
+            break;
+          case "aborted":
+            setVoiceState("Ready");
+            break;
+          default:
+            setVoiceState("Error");
+            setBrowserWarning("Couldn't recognize your speech. Please try again.");
+            break;
+        }
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err: any) {
+      isRecognitionRunningRef.current = false;
+      console.error("❌ Failed to instantiate/start SpeechRecognition:", err);
+      setVoiceState("Error");
+      setBrowserWarning("Couldn't recognize your speech. Please try again.");
+    }
+  }, [currentLanguage, langObj, stopListening, handleSend, hasRetriedOnce]);
+
+  const handleMicToggle = () => {
+    if (voiceState === "Listening" || isRecognitionRunningRef.current) {
+      stopListening();
+    } else {
+      setHasRetriedOnce(false);
+      startListening();
     }
   };
 
   const toggleThinking = (id: string) => {
-    setExpandedThinking(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(id)) {
-        newSet.delete(id);
-      } else {
-        newSet.add(id);
-      }
-      return newSet;
+    setExpandedThinking((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
   };
 
-  const handleBackClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    const newRipple = { x, y, id: Date.now() };
-    setRipples([...ripples, newRipple]);
-    
-    setTimeout(() => {
-      setRipples((prev) => prev.filter((r) => r.id !== newRipple.id));
-    }, 600);
-    
-    // Stop TTS streaming and speech recognition
-    stopStreaming();
-    if (listening) {
-      SpeechRecognition.stopListening();
-    }
-    
-    setIsExiting(true);
-    setTimeout(() => {
-      router.push("/");
-    }, 300);
-  };
-
   return (
-    <div className={`fixed inset-0 flex flex-col bg-linear-to-br from-purple-50 via-purple-100 to-purple-50 transition-transform duration-300 ${isExiting ? 'translate-x-full' : 'translate-x-0'}`}>
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="px-2 pt-2 sm:px-3 sm:pt-3">
-          <div className="bg-white/60 backdrop-blur-2xl rounded-2xl sm:rounded-3xl border border-white/40 px-3 py-2 sm:px-4 sm:py-3 md:px-6 md:py-4">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <button
-                onClick={handleBackClick}
-                className="relative p-2 hover:bg-purple-50 rounded-full transition-colors overflow-hidden"
-                aria-label="Back to home"
-              >
-                {ripples.map((ripple) => (
-                  <span
-                    key={ripple.id}
-                    className="absolute rounded-full bg-purple-400/40 animate-ripple pointer-events-none"
-                    style={{
-                      left: ripple.x,
-                      top: ripple.y,
-                      width: '20px',
-                      height: '20px',
-                      transform: 'translate(-50%, -50%)',
-                      animation: 'ripple 0.6s ease-out',
-                    }}
-                  />
-                ))}
-                <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6 text-purple-700 relative z-10" />
-              </button>
-              <div className="w-8 h-8 sm:w-10 sm:h-10 bg-linear-to-br from-purple-400 to-purple-600 rounded-xl sm:rounded-2xl flex items-center justify-center shadow-lg">
-                <Mic className="w-4 h-4 sm:w-6 sm:h-6 text-white" />
-              </div>
-              <div className="flex-1">
-                <h2 className="text-base sm:text-lg md:text-xl font-bold text-gray-800">{t('speak')}</h2>
-                <p className="text-xs text-gray-600 hidden sm:block">{t('speakYourQuestion')}</p>
-              </div>
-            </div>
+    <div className="min-h-screen bg-[#F8FAF7] text-[#111827] flex flex-col justify-between pb-24 font-sans selection:bg-emerald-500/20">
+      
+      {/* Header */}
+      <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-xl border-b border-gray-200/80 px-4 md:px-8 py-3.5 flex items-center justify-between shadow-2xs">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => router.push("/dashboard")}
+            className="p-2 rounded-xl hover:bg-gray-100 text-gray-600 transition border border-gray-200/80 bg-white"
+            title="Back to Dashboard"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div>
+            <h1 className="text-base font-extrabold text-gray-900 flex items-center gap-2">
+              <Mic className="w-4 h-4 text-emerald-600 animate-pulse" />
+              Multilingual Voice Assistant ({langObj.name})
+            </h1>
+            <p className="text-[11px] text-gray-500 font-semibold">
+              Live Speech-to-Text & Gemini AI Audio Response ({currentLanguage})
+            </p>
           </div>
-        </header>
-
-        {/* Messages */}
-        <div 
-          ref={scrollContainerRef}
-          onScroll={handleScroll}
-          className="flex-1 p-4 overflow-y-auto"
-        >
-          {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center text-gray-500 px-4">
-              <Mic className="w-16 h-16 sm:w-20 sm:h-20 mb-3 sm:mb-4 text-gray-300" />
-              <p className="text-lg sm:text-xl font-semibold mb-2">{t('noMessages')}</p>
-              <p className="text-xs sm:text-sm max-w-md">{t('pressMic')}</p>
-            </div>
-          ) : (
-            <div className="space-y-3 sm:space-y-4 max-w-4xl mx-auto">
-              {messages.map((msg) => (
-                <div key={msg.id} className={`flex gap-2 sm:gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                  {msg.role === "assistant" && (
-                    <div className="shrink-0 w-7 h-7 sm:w-10 sm:h-10 rounded-full bg-purple-600 flex items-center justify-center text-white font-bold text-xs sm:text-sm">
-                      AI
-                    </div>
-                  )}
-                  <div className="flex flex-col gap-1 max-w-[85%] sm:max-w-[75%]">
-                    <div className={`rounded-2xl sm:rounded-3xl px-3 py-2 sm:px-6 sm:py-4 ${
-                      msg.role === "user"
-                        ? "bg-purple-600 text-white rounded-br-none"
-                        : "bg-white border-2 border-gray-200 text-gray-800 rounded-bl-none"
-                    }`}>
-                      {/* Thinking process (collapsible) - only for assistant */}
-                      {msg.role === "assistant" && msg.thinkingText && (
-                        <div className="mb-3 border border-purple-200 rounded-lg overflow-hidden bg-purple-50">
-                          <button
-                            onClick={() => toggleThinking(msg.id)}
-                            className="w-full flex items-center justify-between px-3 py-2 hover:bg-purple-100 transition-colors"
-                          >
-                            <div className="flex items-center gap-2">
-                              <Brain className="w-4 h-4 text-purple-600" />
-                              <span className="text-xs font-medium text-purple-700">AI Thinking Process</span>
-                            </div>
-                            {expandedThinking.has(msg.id) ? (
-                              <ChevronUp className="w-4 h-4 text-purple-500" />
-                            ) : (
-                              <ChevronDown className="w-4 h-4 text-purple-500" />
-                            )}
-                          </button>
-                          {expandedThinking.has(msg.id) && (
-                            <div className="px-2 py-1.5 sm:px-3 sm:py-2 border-t border-purple-200 bg-white max-h-40 sm:max-h-48 overflow-y-auto">
-                              <p className="text-xs leading-relaxed text-gray-600 whitespace-pre-wrap">
-                                {msg.thinkingText}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Text content with markdown rendering */}
-                      <div className={`text-sm sm:text-base leading-relaxed ${msg.role === "user" ? "text-white" : "text-gray-800"}`}>
-                        <ReactMarkdown 
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            // Custom components with explicit styling
-                            h1: ({node, ...props}) => <h1 className={`text-xl font-bold mt-4 mb-2 ${msg.role === "user" ? "text-white" : "text-gray-900"}`} {...props} />,
-                            h2: ({node, ...props}) => <h2 className={`text-lg font-bold mt-3 mb-2 ${msg.role === "user" ? "text-white" : "text-gray-900"}`} {...props} />,
-                            h3: ({node, ...props}) => <h3 className={`text-base font-bold mt-2 mb-1 ${msg.role === "user" ? "text-white" : "text-gray-900"}`} {...props} />,
-                            p: ({node, ...props}) => <p className="my-2" {...props} />,
-                            strong: ({node, ...props}) => <strong className="font-bold" {...props} />,
-                            em: ({node, ...props}) => <em className="italic" {...props} />,
-                            a: ({node, ...props}) => <a className={`underline ${msg.role === "user" ? "text-purple-200" : "text-purple-600"} hover:opacity-80`} target="_blank" rel="noopener noreferrer" {...props} />,
-                            ul: ({node, ...props}) => <ul className="list-disc pl-5 my-2 space-y-1" {...props} />,
-                            ol: ({node, ...props}) => <ol className="list-decimal pl-5 my-2 space-y-1" {...props} />,
-                            li: ({node, ...props}) => <li className="my-1" {...props} />,
-                            code: ({node, inline, ...props}: any) => 
-                              inline 
-                                ? <code className="bg-gray-200 text-gray-800 px-1 py-0.5 rounded text-xs" {...props} />
-                                : <code className="block bg-gray-800 text-white p-3 rounded my-2 overflow-x-auto" {...props} />,
-                            blockquote: ({node, ...props}) => <blockquote className={`border-l-4 pl-4 my-2 italic ${msg.role === "user" ? "border-purple-300" : "border-gray-300"}`} {...props} />,
-                          }}
-                        >
-                          {msg.content}
-                        </ReactMarkdown>
-                      </div>
-                      {msg.audioBase64 && msg.role === "assistant" && (
-                        <div className="mt-2 sm:mt-3 flex items-center gap-1.5 sm:gap-2 bg-purple-50 p-2 sm:p-3 rounded-lg sm:rounded-xl">
-                          <Volume2 className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600 shrink-0" />
-                          <audio controls className="flex-1 h-8 sm:h-10" preload="auto">
-                            <source src={`data:audio/mpeg;base64,${msg.audioBase64}`} type="audio/mpeg" />
-                          </audio>
-                          {msg.isStreaming && (
-                            <button
-                              onClick={() => stopStreaming()}
-                              className="ml-1 sm:ml-2 p-1.5 sm:p-2 bg-red-500 hover:bg-red-600 text-white rounded-md sm:rounded-lg transition-colors flex items-center gap-1"
-                              title="Stop audio"
-                            >
-                              <Square className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                            </button>
-                          )}
-                        </div>
-                      )}
-                      <div className={`text-xs mt-2 ${msg.role === "user" ? "text-purple-100" : "text-gray-500"}`}>
-                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </div>
-                    </div>
-                    
-                    {msg.role === "assistant" && (
-                      <button
-                        onClick={() => handleCopy(msg.content, msg.id)}
-                        className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-800 transition-colors px-2 py-1 hover:bg-gray-100 rounded-lg self-start"
-                        title={copiedId === msg.id ? "Copied!" : "Copy"}
-                      >
-                        {copiedId === msg.id ? (
-                          <>
-                            <Check className="w-3.5 h-3.5 text-green-600" />
-                            <span className="text-green-600 font-medium">Copied!</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5" />
-                            <span>Copy</span>
-                          </>
-                        )}
-                      </button>
-                    )}
-                  </div>
-                  {msg.role === "user" && (
-                    <div className="shrink-0 w-7 h-7 sm:w-10 sm:h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs sm:text-sm">
-                      You
-                    </div>
-                  )}
-                </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
         </div>
+      </header>
 
-        {/* Live Transcription Bar */}
-        {(listening || localText) && (
-          <div className="mx-2 mb-2 sm:mx-3 bg-purple-50/90 backdrop-blur-sm border border-purple-200 rounded-xl sm:rounded-2xl p-2 sm:p-3">
-            <p className="text-xs sm:text-sm text-purple-600 mb-1">Live Transcription:</p>
-            <input
-              type="text"
-              value={localText}
-              onChange={(e) => {
-                setLocalText(e.target.value);
-                setIsManuallyEditing(true);
-              }}
-              onBlur={() => setIsManuallyEditing(false)}
-              placeholder={listening ? "Listening..." : "Type or speak..."}
-              className="w-full text-sm sm:text-base text-purple-900 bg-transparent border-none outline-none focus:ring-2 focus:ring-purple-300 rounded px-2 py-1"
-            />
+      {/* Main Container */}
+      <main className="max-w-4xl mx-auto px-4 pt-6 w-full flex-1 flex flex-col gap-6">
+        
+        {/* WARNING / ERROR NOTIFICATION CARD */}
+        {browserWarning && (
+          <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold flex items-center justify-between shadow-xs animate-in fade-in">
+            <div className="flex items-center gap-2.5">
+              <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+              <span>{browserWarning}</span>
+            </div>
+            <button
+              onClick={() => startListening()}
+              className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold transition shrink-0 ml-3"
+            >
+              Retry Mic
+            </button>
           </div>
         )}
 
-        {/* Footer Control Buttons */}
-        <div className="px-2 pb-2 sm:px-3 sm:pb-3">
-          <div className="bg-white/60 backdrop-blur-2xl rounded-2xl sm:rounded-3xl border border-white/40 px-3 py-2 sm:px-4 sm:py-3 md:px-6 md:py-4">
-            <div className="flex gap-2 sm:gap-3">
-              <button
-                onClick={handleMicToggle}
-                disabled={isLoading}
-                className={`flex-1 flex items-center justify-center gap-2 sm:gap-3 py-3 sm:py-4 md:py-5 rounded-xl sm:rounded-2xl font-bold text-base sm:text-lg md:text-xl transition-all ${
-                  listening
-                    ? "bg-red-500 hover:bg-red-600 text-white animate-pulse"
-                    : "bg-purple-600 text-white hover:bg-purple-700"
-                } disabled:opacity-50 disabled:cursor-not-allowed shadow-lg`}
-              >
-                {listening ? (
-                  <>
-                    <MicOff className="w-5 h-5 sm:w-6 sm:h-6 md:w-8 md:h-8" />
-                    <span>{t('stop')}</span>
-                  </>
-                ) : (
-                  <>
-                    <Mic className="w-5 h-5 sm:w-6 sm:h-6 md:w-8 md:h-8" />
-                    <span>{t('start')}</span>
-                  </>
-                )}
-              </button>
-
-              {localText && (
-                <button
-                  onClick={handleSend}
-                  disabled={isLoading}
-                  className="px-4 sm:px-6 md:px-8 py-3 sm:py-4 md:py-5 bg-linear-to-br from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-xl sm:rounded-2xl transition-all disabled:opacity-50 shadow-lg flex items-center gap-1.5 sm:gap-2"
-                >
-                  <Send className="w-5 h-5 sm:w-6 sm:h-6 md:w-8 md:h-8" />
-                  <span className="text-base sm:text-lg md:text-xl font-bold hidden sm:inline">Send</span>
-                </button>
-              )}
+        {/* HERO VOICE RECORDING STAGE */}
+        <div className="bg-white rounded-[28px] p-8 border border-gray-200/80 shadow-md flex flex-col items-center justify-center text-center space-y-6 relative overflow-hidden">
+          
+          {/* AMBIENT PULSE CIRCLES WHEN LISTENING */}
+          {voiceState === "Listening" && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-72 h-72 rounded-full bg-emerald-400/20 animate-ping"></div>
+              <div className="w-56 h-56 rounded-full bg-emerald-500/30 animate-pulse"></div>
             </div>
+          )}
+
+          {/* MAIN BIG MICROPHONE BUTTON */}
+          <button
+            onClick={handleMicToggle}
+            className={`w-28 h-28 rounded-full flex items-center justify-center transition-all duration-300 transform shadow-xl relative z-10 cursor-pointer ${
+              voiceState === "Listening"
+                ? "bg-rose-600 text-white scale-110 shadow-rose-300"
+                : voiceState === "Processing"
+                ? "bg-amber-500 text-white animate-bounce shadow-amber-200"
+                : "bg-gradient-to-tr from-emerald-600 to-green-500 text-white hover:scale-105 shadow-emerald-200"
+            }`}
+            title="Click to speak"
+          >
+            {voiceState === "Listening" ? (
+              <Square className="w-10 h-10 fill-current" />
+            ) : voiceState === "Processing" ? (
+              <RefreshCw className="w-10 h-10 animate-spin" />
+            ) : (
+              <Mic className="w-12 h-12" />
+            )}
+          </button>
+
+          {/* STATUS LABEL */}
+          <div className="space-y-1">
+            <h2 className="text-base font-black text-gray-900">{statusMessage}</h2>
+            <p className="text-xs text-gray-500 font-medium">Selected Language: <span className="font-extrabold text-emerald-800">{langObj.name} ({langObj.code})</span></p>
           </div>
+
+          {/* LIVE TRANSCRIPT DISPLAY */}
+          {(localText || interimText) && (
+            <div className="w-full max-w-xl p-4 rounded-2xl bg-emerald-50/80 border border-emerald-200 text-emerald-950 text-sm font-semibold text-center animate-in fade-in">
+              <span>{localText}</span>
+              <span className="text-emerald-600 italic ml-1">{interimText}</span>
+            </div>
+          )}
+
         </div>
-      </div>
+
+        {/* VOICE CONVERSATION MESSAGES FEED */}
+        <div className="space-y-4 flex-1">
+          {messages.map((msg, i) => (
+            <div
+              key={msg.id || i}
+              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              <div
+                className={`max-w-[85%] rounded-[24px] p-5 shadow-xs space-y-2 ${
+                  msg.role === "user"
+                    ? "bg-emerald-600 text-white rounded-br-none"
+                    : "bg-white text-gray-900 border border-gray-200/80 rounded-bl-none"
+                }`}
+              >
+                {/* THINKING COLLAPSIBLE ACCORDION */}
+                {msg.thinkingText && (
+                  <div className="border-b border-gray-200/60 pb-2">
+                    <button
+                      onClick={() => toggleThinking(msg.id)}
+                      className="text-xs font-bold text-emerald-700 flex items-center gap-1.5 hover:underline"
+                    >
+                      <Brain className="w-3.5 h-3.5" />
+                      <span>Sarvam AI Reasoning Process</span>
+                      {expandedThinking.has(msg.id) ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                    </button>
+                    {expandedThinking.has(msg.id) && (
+                      <p className="text-xs italic text-gray-500 mt-2 bg-gray-50 p-2.5 rounded-xl border border-gray-200/60">
+                        {msg.thinkingText}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* MESSAGE MARKDOWN CONTENT */}
+                <div className="text-xs md:text-sm leading-relaxed prose max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                </div>
+
+                {/* AUDIO AUDIO RE-PLAY BUTTON */}
+                {msg.role === "assistant" && (
+                  <div className="pt-1 flex items-center justify-end">
+                    <button
+                      onClick={() => speakNaturalVoice(msg.content, currentLanguage)}
+                      className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-[11px] font-bold flex items-center gap-1 transition"
+                    >
+                      <Volume2 className="w-3 h-3" /> Listen Again
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
+
+      </main>
+
+      {/* FLOATING DEVELOPMENT-ONLY DEBUG PANEL */}
+      {process.env.NODE_ENV !== "production" && (
+        <div className="fixed bottom-4 right-4 bg-gray-900/90 backdrop-blur-md text-white p-3.5 rounded-2xl border border-gray-700 shadow-2xl text-[11px] font-mono z-50 max-w-xs space-y-1.5">
+          <div className="flex items-center gap-1.5 text-emerald-400 font-bold border-b border-gray-700 pb-1">
+            <Terminal className="w-3.5 h-3.5" /> Voice Debug Panel (Dev Only)
+          </div>
+          <div><span className="text-gray-400">Supported:</span> {isSupportedRef.current ? "YES ✅" : "NO ❌"}</div>
+          <div><span className="text-gray-400">Mic Permission:</span> <span className={micPermissionStatus === "granted" ? "text-emerald-400 font-bold" : "text-rose-400 font-bold"}>{micPermissionStatus}</span></div>
+          <div><span className="text-gray-400">Recognition Lang:</span> {currentLanguage || "en-IN"}</div>
+          <div><span className="text-gray-400">State:</span> {voiceState}</div>
+          <div><span className="text-gray-400">Transcript:</span> {localText || interimText || "(none)"}</div>
+          <div><span className="text-gray-400">Last Error:</span> {lastErrorCode || "None"}</div>
+        </div>
+      )}
+
     </div>
   );
 }

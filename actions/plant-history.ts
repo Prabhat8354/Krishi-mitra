@@ -1,9 +1,7 @@
 "use server";
 
-import { db } from "@/lib/db";
-import { plantAnalysisHistory } from "@/drizzle/schema";
-import { desc, eq } from "drizzle-orm";
-import { deleteImageFromBlob } from "@/lib/blob-storage";
+import { connectDB } from "@/lib/db";
+import { DiseaseDetectionModel } from "@/models/DiseaseDetection";
 
 interface PlantHistoryItem {
   id: string;
@@ -22,6 +20,7 @@ interface PlantHistoryItem {
 
 interface SavePlantAnalysisData {
   sessionId: string;
+  userId?: string;
   imageUrl: string;
   plantName?: string;
   plantDescription?: string;
@@ -38,18 +37,15 @@ export async function savePlantAnalysis(
   data: SavePlantAnalysisData
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    await db.insert(plantAnalysisHistory).values({
-      sessionId: data.sessionId,
+    await connectDB();
+    await DiseaseDetectionModel.create({
+      userId: data.userId || "000000000000000000000000",
       imageUrl: data.imageUrl,
-      plantName: data.plantName,
-      plantDescription: data.plantDescription,
-      plantProbability: data.plantProbability,
       disease: data.disease,
-      probability: data.probability,
+      confidence: data.probability,
+      treatment: data.treatment || "Standard crop protection",
       symptoms: data.symptoms,
-      treatment: data.treatment,
       prevention: data.prevention,
-      isHealthy: data.isHealthy ? "true" : "false",
     });
 
     return { success: true };
@@ -66,26 +62,20 @@ export async function getPlantAnalysisHistory(
   sessionId: string
 ): Promise<PlantHistoryItem[]> {
   try {
-    const history = await db
-      .select()
-      .from(plantAnalysisHistory)
-      .where(eq(plantAnalysisHistory.sessionId, sessionId))
-      .orderBy(desc(plantAnalysisHistory.timestamp))
-      .limit(20);
+    await connectDB();
+    const history = await DiseaseDetectionModel.find().sort({ createdAt: -1 }).limit(20);
 
-    return history.map((item) => ({
-      id: item.id,
+    return history.map((item: any) => ({
+      id: item._id.toString(),
       imageUrl: item.imageUrl,
-      plantName: item.plantName || undefined,
-      plantDescription: item.plantDescription || undefined,
-      plantProbability: item.plantProbability || undefined,
+      plantName: "Crop Specimen",
       disease: item.disease,
-      probability: item.probability,
-      symptoms: item.symptoms || undefined,
-      treatment: item.treatment || undefined,
-      prevention: item.prevention || undefined,
-      isHealthy: item.isHealthy === "true",
-      timestamp: item.timestamp,
+      probability: item.confidence,
+      symptoms: item.symptoms,
+      treatment: item.treatment,
+      prevention: item.prevention,
+      isHealthy: item.disease.toLowerCase().includes("healthy"),
+      timestamp: item.createdAt,
     }));
   } catch (error) {
     console.error("Failed to fetch plant analysis history:", error);
@@ -97,26 +87,8 @@ export async function deletePlantAnalysisHistory(
   sessionId: string
 ): Promise<{ success: boolean }> {
   try {
-    // Get all items to delete their blob images
-    const items = await db
-      .select()
-      .from(plantAnalysisHistory)
-      .where(eq(plantAnalysisHistory.sessionId, sessionId));
-    
-    // Delete blob images (only if they're blob URLs, not base64)
-    await Promise.all(
-      items.map((item) => {
-        if (item.imageUrl.startsWith("https://") && item.imageUrl.includes("blob.vercel-storage.com")) {
-          return deleteImageFromBlob(item.imageUrl);
-        }
-        return Promise.resolve({ success: true });
-      })
-    );
-    
-    // Delete from database
-    await db
-      .delete(plantAnalysisHistory)
-      .where(eq(plantAnalysisHistory.sessionId, sessionId));
+    await connectDB();
+    await DiseaseDetectionModel.deleteMany({});
     return { success: true };
   } catch (error) {
     console.error("Failed to delete plant analysis history:", error);
@@ -128,21 +100,8 @@ export async function deleteSinglePlantAnalysis(
   id: string
 ): Promise<{ success: boolean }> {
   try {
-    // Get the item to delete its blob image
-    const [item] = await db
-      .select()
-      .from(plantAnalysisHistory)
-      .where(eq(plantAnalysisHistory.id, id))
-      .limit(1);
-    
-    if (item && item.imageUrl.startsWith("https://") && item.imageUrl.includes("blob.vercel-storage.com")) {
-      await deleteImageFromBlob(item.imageUrl);
-    }
-    
-    // Delete from database
-    await db
-      .delete(plantAnalysisHistory)
-      .where(eq(plantAnalysisHistory.id, id));
+    await connectDB();
+    await DiseaseDetectionModel.findByIdAndDelete(id);
     return { success: true };
   } catch (error) {
     console.error("Failed to delete plant analysis:", error);

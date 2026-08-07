@@ -1,42 +1,53 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { User, Trash2, PlusCircle, Volume2, VolumeX, Menu, X, Globe, RefreshCw, Sun, Moon } from "lucide-react";
+import { Globe, Sun, Moon, Volume2, VolumeX, RefreshCw, LogOut, User, Edit, Bell, ChevronDown, LogIn, UserPlus } from "lucide-react";
 import { useStore } from "@/store/useStore";
 import { getLanguageByCode } from "@/lib/languages";
+import { useAuth } from "@/context/AuthContext";
 import AudioButton from "./ui/AudioButton";
+import NotificationDrawer from "./NotificationDrawer";
+import KrishiMitraLogo from "./KrishiMitraLogo";
+import LoginModal from "./Auth/LoginModal";
+import RegisterModal from "./Auth/RegisterModal";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 
-export default function ProfileHeader() {
+const ProfileHeader = React.memo(function ProfileHeader() {
   const { t, i18n } = useTranslation();
-  const sessionId = useStore((state) => state.sessionId);
+  const router = useRouter();
+  const { user, isAuthenticated, logout: authLogout } = useAuth();
+  
   const currentLanguage = useStore((state) => state.currentLanguage);
   const audioEnabled = useStore((state) => state.audioEnabled);
+  const profile = useStore((state) => state.profile);
   const setSessionId = useStore((state) => state.setSessionId);
   const setLanguage = useStore((state) => state.setLanguage);
   const setAudioEnabled = useStore((state) => state.setAudioEnabled);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const language = getLanguageByCode(currentLanguage);
-  const [greeting, setGreeting] = useState('');
 
-  useEffect(() => {
-    if (currentLanguage) {
-      i18n.changeLanguage(currentLanguage);
-    }
-  }, [currentLanguage, i18n]);
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [registerModalOpen, setRegisterModalOpen] = useState(false);
 
-  useEffect(() => {
+  // Memoize localized greeting string dynamically based on target language
+  const greeting = useMemo(() => {
+    const langObj = getLanguageByCode(currentLanguage);
     const hour = new Date().getHours();
-    if (hour >= 5 && hour < 12) {
-      setGreeting(t('goodMorning'));
-    } else if (hour >= 12 && hour < 17) {
-      setGreeting(t('goodAfternoon'));
-    } else if (hour >= 17 && hour < 21) {
-      setGreeting(t('goodEvening'));
-    } else {
-      setGreeting(t('goodNight'));
-    }
-  }, [t]);
+    if (hour >= 5 && hour < 12) return langObj.greetings.morning;
+    if (hour >= 12 && hour < 17) return langObj.greetings.afternoon;
+    return langObj.greetings.evening;
+  }, [currentLanguage]);
+
+  const isDaytime = useMemo(() => {
+    const hour = new Date().getHours();
+    return hour >= 6 && hour < 18;
+  }, []);
+
+  const farmerFirstName = useMemo(() => {
+    if (user?.name) return user.name.split(" ")[0];
+    return profile.name ? profile.name.split(" ")[0] : "Farmer";
+  }, [user, profile.name]);
 
   const generateNewUUID = () => {
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -47,7 +58,7 @@ export default function ProfileHeader() {
   };
 
   const handleNewSession = () => {
-    if (confirm(t('newSessionConfirm'))) {
+    if (confirm(t("newSessionConfirm") || "Start new chat session?")) {
       const newId = generateNewUUID();
       setSessionId(newId);
       localStorage.removeItem("farmer-chat-messages");
@@ -55,144 +66,171 @@ export default function ProfileHeader() {
     }
   };
 
-  const handleDeleteData = () => {
-    if (confirm(t('deleteAllConfirm'))) {
-      localStorage.clear();
-      window.location.reload();
-    }
-  };
-
-  const handleChangeLanguage = () => {
-    if (confirm(t('changeLanguageConfirm'))) {
-      setLanguage("");
-      window.location.href = "/";
+  const handleLogout = async () => {
+    setProfileDropdownOpen(false);
+    if (confirm("Are you sure you want to log out?")) {
+      await authLogout();
+      useStore.getState().logout();
+      window.location.href = "/login";
     }
   };
 
   return (
-    <header className="sticky top-0 z-50 px-3 pt-3">
-      <div className="container mx-auto max-w-7xl">
-        <div className="bg-white/30 backdrop-blur-2xl shadow-lg rounded-3xl border border-white/40 px-4 md:px-6 py-3 md:py-4" style={{ background: 'linear-gradient(135deg, rgba(167, 243, 208, 0.4) 0%, rgba(134, 239, 172, 0.4) 100%)' }}>
-          <div className="flex items-center justify-between">
-            
-            {/* Logo & Greeting */}
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 md:w-12 md:h-12 bg-white/40 backdrop-blur-xl rounded-2xl flex items-center justify-center border border-white/60">
-                {new Date().getHours() >= 6 && new Date().getHours() < 18 ? (
-                  <Sun className="w-5 h-5 md:w-6 md:h-6 text-yellow-600 drop-shadow-[0_0_12px_rgba(202,138,4,0.8)] fill-yellow-400" />
-                ) : (
-                  <Moon className="w-5 h-5 md:w-6 md:h-6 text-blue-400 drop-shadow-[0_0_12px_rgba(96,165,250,0.8)] fill-blue-200" />
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base md:text-xl font-bold text-gray-900 leading-tight">{greeting}</h1>
-                <AudioButton text={greeting} />
-              </div>
-            </div>
+    <>
+      <header className="sticky top-0 z-40 w-full border-b border-emerald-900/5 bg-white/85 backdrop-blur-xl">
+        <div className="max-w-[1400px] mx-auto px-4 md:px-8 py-3.5 flex items-center justify-between">
+          
+          {/* Official Krishi Mitra Logo & Stable Greeting */}
+          <div className="flex items-center gap-4">
+            <Link href="/" className="flex items-center group">
+              <KrishiMitraLogo size={38} showText={true} />
+            </Link>
 
-            {/* Actions */}
-            <div className="flex items-center gap-2 md:gap-3">
-            
-            {/* Language Badge */}
-            <div className="hidden md:flex items-center gap-2 bg-white/50 backdrop-blur-sm border border-white/60 rounded-full px-4 py-2 shadow-sm">
-              <Globe className="w-4 h-4 text-green-700" />
-              <span className="text-sm font-semibold text-gray-800">{language?.name || "English"}</span>
+            <div className="h-6 w-px bg-gray-200 hidden lg:block"></div>
+
+            <div className="hidden lg:flex items-center gap-2 text-xs font-semibold text-gray-600 bg-gray-50 px-3 py-1.5 rounded-full border border-gray-200/60">
+              {isDaytime ? (
+                <Sun className="w-4 h-4 text-amber-500 shrink-0" />
+              ) : (
+                <Moon className="w-4 h-4 text-indigo-400 shrink-0" />
+              )}
+              <span>{greeting}, {farmerFirstName}</span>
+              <AudioButton text={`${greeting}, ${farmerFirstName}`} className="ml-1 text-gray-400 hover:text-gray-700" />
             </div>
+          </div>
+
+          {/* Right Controls */}
+          <div className="flex items-center gap-2.5">
             
-            {/* Audio Toggle - Always Visible & Big */}
+            {/* Notification Drawer */}
+            <NotificationDrawer />
+
+            {/* Voice Audio Toggle */}
             <button
               onClick={() => setAudioEnabled(!audioEnabled)}
-              className={`p-2 md:p-3 rounded-full transition-all shadow-md ${
-                audioEnabled 
-                  ? "bg-green-500 text-white shadow-green-200" 
-                  : "bg-gray-100 text-gray-400"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition ${
+                audioEnabled
+                  ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                  : "bg-gray-100 text-gray-600 border border-gray-200"
               }`}
-              title={audioEnabled ? t('audioOn') : t('audioOff')}
             >
-              {audioEnabled ? <Volume2 className="w-5 h-5 md:w-6 md:h-6" /> : <VolumeX className="w-5 h-5 md:w-6 md:h-6" />}
+              {audioEnabled ? <Volume2 className="w-3.5 h-3.5 text-emerald-600" /> : <VolumeX className="w-3.5 h-3.5 text-gray-400" />}
+              <span className="hidden md:inline">{audioEnabled ? t("audioOn") : t("audioOff")}</span>
             </button>
 
-            {/* Desktop: Quick Actions */}
-            <div className="hidden md:flex items-center gap-2">
-              <button
-                onClick={handleNewSession}
-                className="flex items-center gap-2 bg-green-50/80 backdrop-blur-sm text-green-700 px-4 py-2 rounded-full hover:bg-green-100 transition-all border border-green-200/50 font-semibold shadow-sm"
+            {/* Language Selector Dropdown */}
+            <div className="relative">
+              <select
+                value={currentLanguage || "hi-IN"}
+                onChange={(e) => {
+                  const langCode = e.target.value;
+                  setLanguage(langCode);
+                  i18n.changeLanguage(langCode);
+                }}
+                className="px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-800 text-xs font-bold border border-emerald-200 cursor-pointer focus:ring-2 focus:ring-emerald-500 focus:outline-none"
               >
-                <RefreshCw className="w-4 h-4" />
-                <span>{t('newSession')}</span>
-                <AudioButton text={t('newSession')} className="ml-1" />
-              </button>
-
-              <button
-                onClick={handleChangeLanguage}
-                className="flex items-center gap-2 bg-blue-50/80 backdrop-blur-sm text-blue-700 px-4 py-2 rounded-full hover:bg-blue-100 transition-all border border-blue-200/50 font-semibold shadow-sm"
-              >
-                <Globe className="w-4 h-4" />
-                <span>{t('changeLanguage')}</span>
-                <AudioButton text={t('changeLanguage')} className="ml-1" />
-              </button>
+                <option value="en-IN">🇬🇧 English</option>
+                <option value="hi-IN">🇮🇳 हिन्दी (Hindi)</option>
+                <option value="pa-IN">🇮🇳 ਪੰਜਾਬੀ (Punjabi)</option>
+                <option value="mr-IN">🇮🇳 मराठी (Marathi)</option>
+                <option value="gu-IN">🇮🇳 ગુજરાતી (Gujarati)</option>
+                <option value="bn-IN">🇮🇳 বাংলা (Bengali)</option>
+                <option value="ta-IN">🇮🇳 தமிழ் (Tamil)</option>
+                <option value="te-IN">🇮🇳 తెలుగు (Telugu)</option>
+                <option value="kn-IN">🇮🇳 ಕನ್ನಡ (Kannada)</option>
+                <option value="ml-IN">🇮🇳 മലയാളം (Malayalam)</option>
+              </select>
             </div>
 
-            {/* Mobile Menu Toggle */}
-            <button
-              onClick={() => setMenuOpen(!menuOpen)}
-              className="p-2 rounded-full hover:bg-gray-100/80 text-gray-700 transition-all md:hidden shadow-sm"
-            >
-              {menuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-            </button>
-          </div>
-        </div>
-      </div>
-
-        {/* Mobile Menu - Clean & Spacious */}
-        {menuOpen && (
-          <div className="mt-3 md:hidden bg-white/30 backdrop-blur-2xl rounded-2xl shadow-lg border border-white/40 overflow-hidden animate-in slide-in-from-top-2 duration-200" style={{ background: 'linear-gradient(135deg, rgba(167, 243, 208, 0.4) 0%, rgba(134, 239, 172, 0.4) 100%)' }}>
-            <div className="p-4 space-y-3">
-              
-              {/* Language Change Button with Current Language */}
-              {/* Change Language */}
-              <button
-                onClick={() => { handleChangeLanguage(); setMenuOpen(false); }}
-                className="w-full flex items-center justify-between bg-white/50 backdrop-blur-sm p-4 rounded-xl hover:bg-white/70 transition-all border border-white/60"
-              >
-                <span className="text-sm font-semibold text-gray-900">{t('changeLanguage')}</span>
-                <div className="flex items-center gap-2 bg-white/60 px-3 py-1.5 rounded-full border border-white/60">
-                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                  <span className="text-xs font-bold text-gray-900">{language?.name || "English"}</span>
-                </div>
-              </button>
-              
-              {/* User Info Card with New Session & Delete */}
-              <div className="flex gap-2">
-                <div className="flex-1 bg-white/50 backdrop-blur-sm rounded-xl p-4 flex items-center gap-3 border border-white/60">
-                  <div className="w-10 h-10 bg-white/70 rounded-full flex items-center justify-center text-blue-700 shadow-sm">
-                    <User className="w-5 h-5" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-bold text-gray-900">{t('guestId')}</p>
-                    <p className="text-xs font-mono text-gray-700">{sessionId.slice(0, 8)}...</p>
-                  </div>
-                  <button
-                    onClick={() => { handleDeleteData(); setMenuOpen(false); }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-red-50 rounded-lg transition-all"
-                  >
-                    <Trash2 className="w-4 h-4 text-red-600" />
-                    <span className="text-xs font-semibold text-red-600">{t('deleteData')}</span>
-                  </button>
-                </div>
-                
+            {/* AUTH BUTTONS OR PROFILE DROPDOWN */}
+            {!isAuthenticated ? (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => { handleNewSession(); setMenuOpen(false); }}
-                  className="flex flex-col items-center justify-center gap-1 bg-white/50 backdrop-blur-sm px-4 py-3 rounded-xl hover:bg-white/70 transition-all border border-white/60"
+                  onClick={() => setLoginModalOpen(true)}
+                  className="px-3.5 py-1.5 bg-white hover:bg-gray-50 text-gray-800 text-xs font-bold rounded-full border border-gray-200 transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
                 >
-                  <RefreshCw className="w-6 h-6 text-green-700" />
-                  <span className="text-xs font-semibold text-gray-900">{t('newSession')}</span>
+                  <LogIn className="w-3.5 h-3.5 text-emerald-600" /> Login
+                </button>
+                <button
+                  onClick={() => setRegisterModalOpen(true)}
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-full transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5" /> Register
                 </button>
               </div>
-            </div>
+            ) : (
+              <div className="relative">
+                <button
+                  onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
+                  className="flex items-center gap-1.5 p-1.5 pl-2.5 pr-2 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 transition text-xs font-bold cursor-pointer"
+                >
+                  <div className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center font-black text-xs">
+                    {user?.name ? user.name.charAt(0).toUpperCase() : "F"}
+                  </div>
+                  <span className="hidden md:inline">{farmerFirstName}</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-emerald-700" />
+                </button>
+
+                {profileDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-200/80 py-2 z-50 animate-in fade-in duration-150">
+                    <div className="px-4 py-2 border-b border-gray-100">
+                      <div className="font-bold text-xs text-gray-900">{user?.name || profile.name || "Farmer"}</div>
+                      <div className="text-[10px] text-emerald-700 font-semibold">{user?.district || profile.district || "Ludhiana"}, {user?.state || profile.state || "Punjab"}</div>
+                    </div>
+
+                    <Link
+                      href="/profile"
+                      onClick={() => setProfileDropdownOpen(false)}
+                      className="flex items-center gap-2.5 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-emerald-50 hover:text-emerald-800 transition"
+                    >
+                      <User className="w-4 h-4 text-emerald-600" /> My Profile
+                    </Link>
+
+                    <Link
+                      href="/alerts"
+                      onClick={() => setProfileDropdownOpen(false)}
+                      className="flex items-center gap-2.5 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-emerald-50 hover:text-emerald-800 transition"
+                    >
+                      <Bell className="w-4 h-4 text-amber-600" /> Notification Settings
+                    </Link>
+
+                    <div className="border-t border-gray-100 my-1"></div>
+
+                    <button
+                      onClick={handleLogout}
+                      className="w-full flex items-center gap-2.5 px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 transition text-left cursor-pointer"
+                    >
+                      <LogOut className="w-4 h-4 text-rose-600" /> Logout
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
           </div>
-        )}
-      </div>
-    </header>
+        </div>
+      </header>
+
+      {/* LOGIN & REGISTER MODALS */}
+      <LoginModal
+        isOpen={loginModalOpen}
+        onClose={() => setLoginModalOpen(false)}
+        onSwitchToRegister={() => {
+          setLoginModalOpen(false);
+          setRegisterModalOpen(true);
+        }}
+      />
+
+      <RegisterModal
+        isOpen={registerModalOpen}
+        onClose={() => setRegisterModalOpen(false)}
+        onSwitchToLogin={() => {
+          setRegisterModalOpen(false);
+          setLoginModalOpen(true);
+        }}
+      />
+    </>
   );
-}
+});
+
+export default ProfileHeader;

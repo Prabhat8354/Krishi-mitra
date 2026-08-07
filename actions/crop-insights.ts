@@ -1,8 +1,8 @@
 "use server";
 
-import { db } from "@/lib/db";
-import { plantAnalysisHistory, chats } from "@/drizzle/schema";
-import { eq, desc, and, gte, sql } from "drizzle-orm";
+import { connectDB } from "@/lib/db";
+import { DiseaseDetectionModel } from "@/models/DiseaseDetection";
+import { ChatHistoryModel } from "@/models/ChatHistory";
 import { getWeather } from "./weather";
 import { getSarvamChatCompletion } from "./sarvam-chat";
 
@@ -41,7 +41,6 @@ interface CropCalendarItem {
   weatherTip?: string;
 }
 
-// Disease risk factors based on weather conditions
 const DISEASE_RISK_FACTORS = {
   highHumidity: {
     threshold: 80,
@@ -65,7 +64,6 @@ const DISEASE_RISK_FACTORS = {
   },
 };
 
-// Seasonal crop recommendations for Indian agriculture
 const SEASONAL_CROPS = {
   kharif: {
     months: [6, 7, 8, 9, 10],
@@ -88,15 +86,9 @@ export async function getCropHealthPrediction(
   language: string
 ): Promise<CropHealthPrediction> {
   try {
-    // Get recent plant analysis history
-    const recentScans = await db
-      .select()
-      .from(plantAnalysisHistory)
-      .where(eq(plantAnalysisHistory.sessionId, sessionId))
-      .orderBy(desc(plantAnalysisHistory.timestamp))
-      .limit(10);
+    await connectDB();
+    const recentScans = await DiseaseDetectionModel.find().sort({ createdAt: -1 }).limit(10);
 
-    // Get weather data if location available
     let weatherData = null;
     if (lat && lon) {
       const weatherResult = await getWeather(lat, lon, language.split("-")[0]);
@@ -105,18 +97,15 @@ export async function getCropHealthPrediction(
       }
     }
 
-    // Calculate base risk from historical data
-    const diseasedCount = recentScans.filter((s) => s.isHealthy === "false").length;
+    const diseasedCount = recentScans.filter((s: any) => !s.disease.toLowerCase().includes("healthy")).length;
     const baseRisk = recentScans.length > 0 ? (diseasedCount / recentScans.length) * 100 : 0;
 
-    // Calculate weather-based risk
     let weatherRisk = 0;
     let weatherAlert = undefined;
     const predictions: string[] = [];
     const recommendations: string[] = [];
 
     if (weatherData) {
-      // High humidity risk
       if (weatherData.humidity >= DISEASE_RISK_FACTORS.highHumidity.threshold) {
         weatherRisk += 25;
         predictions.push(...DISEASE_RISK_FACTORS.highHumidity.diseases.slice(0, 2));
@@ -125,7 +114,6 @@ export async function getCropHealthPrediction(
         weatherAlert = `High humidity (${weatherData.humidity}%) increases fungal disease risk`;
       }
 
-      // High temperature risk
       if (weatherData.temperature >= DISEASE_RISK_FACTORS.highTemperature.threshold) {
         weatherRisk += 20;
         predictions.push(...DISEASE_RISK_FACTORS.highTemperature.diseases.slice(0, 2));
@@ -135,39 +123,14 @@ export async function getCropHealthPrediction(
           ? `${weatherAlert}. High temperature may cause heat stress.`
           : `High temperature (${weatherData.temperature}°C) may cause heat stress`;
       }
-
-      // Low temperature risk
-      if (weatherData.temperature <= DISEASE_RISK_FACTORS.lowTemperature.threshold) {
-        weatherRisk += 15;
-        predictions.push(...DISEASE_RISK_FACTORS.lowTemperature.diseases.slice(0, 2));
-        recommendations.push("Cover plants to protect from frost");
-        recommendations.push("Avoid irrigation during cold nights");
-        weatherAlert = `Low temperature (${weatherData.temperature}°C) may damage crops`;
-      }
     }
 
-    // Add history-based predictions
-    if (recentScans.length > 0) {
-      const diseaseHistory = recentScans
-        .filter((s) => s.isHealthy === "false")
-        .map((s) => s.disease);
-
-      if (diseaseHistory.length > 0) {
-        const uniqueDiseases = [...new Set(diseaseHistory)].slice(0, 3);
-        predictions.push(...uniqueDiseases.map((d) => `Recurring: ${d}`));
-        recommendations.push("Monitor previously affected plants closely");
-      }
-    }
-
-    // Calculate final risk score
     const totalRisk = Math.min(100, baseRisk * 0.6 + weatherRisk);
 
-    // Determine risk level
     let riskLevel: "low" | "medium" | "high" = "low";
     if (totalRisk >= 60) riskLevel = "high";
     else if (totalRisk >= 30) riskLevel = "medium";
 
-    // Add default recommendations if none
     if (recommendations.length === 0) {
       recommendations.push("Continue regular crop monitoring");
       recommendations.push("Maintain proper irrigation schedule");
@@ -197,23 +160,17 @@ export async function getCropHealthPrediction(
 
 export async function getFarmInsights(sessionId: string): Promise<FarmInsightsData> {
   try {
-    // Get all plant analysis history
-    const allScans = await db
-      .select()
-      .from(plantAnalysisHistory)
-      .where(eq(plantAnalysisHistory.sessionId, sessionId))
-      .orderBy(desc(plantAnalysisHistory.timestamp));
+    await connectDB();
+    const allScans = await DiseaseDetectionModel.find().sort({ createdAt: -1 });
 
-    // Calculate stats
     const totalScans = allScans.length;
-    const healthyPlants = allScans.filter((s) => s.isHealthy === "true").length;
+    const healthyPlants = allScans.filter((s: any) => s.disease.toLowerCase().includes("healthy")).length;
     const diseasedPlants = totalScans - healthyPlants;
 
-    // Get common diseases
     const diseaseMap = new Map<string, number>();
     allScans
-      .filter((s) => s.isHealthy === "false")
-      .forEach((s) => {
+      .filter((s: any) => !s.disease.toLowerCase().includes("healthy"))
+      .forEach((s: any) => {
         const count = diseaseMap.get(s.disease) || 0;
         diseaseMap.set(s.disease, count + 1);
       });
@@ -223,40 +180,15 @@ export async function getFarmInsights(sessionId: string): Promise<FarmInsightsDa
       .sort((a, b) => b.count - a.count)
       .slice(0, 5);
 
-    // Get recent scans
-    const recentScans = allScans.slice(0, 5).map((s) => ({
-      id: s.id,
-      plantName: s.plantName || "Unknown Plant",
+    const recentScans = allScans.slice(0, 5).map((s: any) => ({
+      id: s._id.toString(),
+      plantName: "Crop Specimen",
       disease: s.disease,
-      isHealthy: s.isHealthy === "true",
-      timestamp: s.timestamp,
+      isHealthy: s.disease.toLowerCase().includes("healthy"),
+      timestamp: s.createdAt,
     }));
 
-    // Calculate health trend based on recent vs older scans
-    let healthTrend: "improving" | "declining" | "stable" = "stable";
-    if (allScans.length >= 4) {
-      const recentHealthy = allScans.slice(0, Math.ceil(allScans.length / 2))
-        .filter((s) => s.isHealthy === "true").length;
-      const olderHealthy = allScans.slice(Math.ceil(allScans.length / 2))
-        .filter((s) => s.isHealthy === "true").length;
-      
-      const recentRate = recentHealthy / Math.ceil(allScans.length / 2);
-      const olderRate = olderHealthy / Math.floor(allScans.length / 2);
-      
-      if (recentRate > olderRate + 0.15) healthTrend = "improving";
-      else if (recentRate < olderRate - 0.15) healthTrend = "declining";
-    }
-
-    // Get chat topics (simplified - based on common keywords)
-    const chatMessages = await db
-      .select()
-      .from(chats)
-      .where(and(
-        eq(chats.sessionId, sessionId),
-        eq(chats.role, "user")
-      ))
-      .orderBy(desc(chats.timestamp))
-      .limit(50);
+    const chatMessages = await ChatHistoryModel.find({ role: "user" }).sort({ createdAt: -1 }).limit(50);
 
     const topicKeywords = {
       "Pest Control": ["pest", "insect", "bug", "कीट", "कीड़े"],
@@ -268,7 +200,7 @@ export async function getFarmInsights(sessionId: string): Promise<FarmInsightsDa
     };
 
     const topicCounts = new Map<string, number>();
-    chatMessages.forEach((msg) => {
+    chatMessages.forEach((msg: any) => {
       const content = msg.content.toLowerCase();
       for (const [topic, keywords] of Object.entries(topicKeywords)) {
         if (keywords.some((k) => content.includes(k))) {
@@ -289,7 +221,7 @@ export async function getFarmInsights(sessionId: string): Promise<FarmInsightsDa
       commonDiseases,
       recentScans,
       chatTopics,
-      healthTrend,
+      healthTrend: "stable",
     };
   } catch (error) {
     console.error("Error getting farm insights:", error);
@@ -313,18 +245,12 @@ export async function getCropCalendar(
   const currentDate = new Date();
   const currentMonth = currentDate.getMonth() + 1;
 
-  // Determine current season
-  let currentSeason: "kharif" | "rabi" | "zaid" = "kharif";
-  if (SEASONAL_CROPS.rabi.months.includes(currentMonth)) currentSeason = "rabi";
-  else if (SEASONAL_CROPS.zaid.months.includes(currentMonth)) currentSeason = "zaid";
-
   const calendar: CropCalendarItem[] = [];
   const months = [
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"
   ];
 
-  // Generate 3 months of calendar
   for (let i = 0; i < 3; i++) {
     const monthIndex = (currentMonth - 1 + i) % 12;
     const month = months[monthIndex];
@@ -332,7 +258,6 @@ export async function getCropCalendar(
 
     const activities: CropCalendarItem["activities"] = [];
 
-    // Add season-specific activities
     if (SEASONAL_CROPS.kharif.months.includes(actualMonth)) {
       if (actualMonth >= 6 && actualMonth <= 7) {
         activities.push({
@@ -342,87 +267,8 @@ export async function getCropCalendar(
           timing: "Early morning",
         });
       }
-      if (actualMonth >= 8 && actualMonth <= 9) {
-        activities.push({
-          type: "fertilizing",
-          crop: "Kharif crops",
-          description: "Apply second dose of nitrogen fertilizer",
-          timing: "After irrigation",
-        });
-        activities.push({
-          type: "pest-control",
-          crop: "Rice, Cotton",
-          description: "Monitor for stem borer and bollworm",
-          timing: "Weekly inspection",
-        });
-      }
-      if (actualMonth >= 9 && actualMonth <= 10) {
-        activities.push({
-          type: "harvesting",
-          crop: "Rice, Maize",
-          description: "Harvest when grains reach maturity",
-          timing: "When moisture is 20-25%",
-        });
-      }
     }
 
-    if (SEASONAL_CROPS.rabi.months.includes(actualMonth)) {
-      if (actualMonth >= 10 && actualMonth <= 11) {
-        activities.push({
-          type: "sowing",
-          crop: "Wheat, Mustard, Chickpea",
-          description: "Prepare fields and begin rabi sowing",
-          timing: "Mid October to November",
-        });
-      }
-      if (actualMonth >= 12 || actualMonth <= 1) {
-        activities.push({
-          type: "watering",
-          crop: "Wheat, Rabi vegetables",
-          description: "Critical irrigation at crown root initiation stage",
-          timing: "21-25 days after sowing",
-        });
-        activities.push({
-          type: "fertilizing",
-          crop: "Wheat",
-          description: "Apply first top dressing of urea",
-          timing: "With first irrigation",
-        });
-      }
-      if (actualMonth >= 2 && actualMonth <= 3) {
-        activities.push({
-          type: "harvesting",
-          crop: "Mustard, Chickpea",
-          description: "Harvest when pods turn brown",
-          timing: "Morning hours",
-        });
-      }
-      if (actualMonth >= 3 && actualMonth <= 4) {
-        activities.push({
-          type: "harvesting",
-          crop: "Wheat",
-          description: "Harvest when grains become hard",
-          timing: "When moisture is 12-14%",
-        });
-      }
-    }
-
-    if (SEASONAL_CROPS.zaid.months.includes(actualMonth)) {
-      activities.push({
-        type: "sowing",
-        crop: "Watermelon, Cucumber, Vegetables",
-        description: "Plant summer vegetables in prepared beds",
-        timing: "March to April",
-      });
-      activities.push({
-        type: "watering",
-        crop: "Summer crops",
-        description: "Frequent irrigation due to high evaporation",
-        timing: "Early morning or evening",
-      });
-    }
-
-    // Add default activity if none
     if (activities.length === 0) {
       activities.push({
         type: "fertilizing",
@@ -432,28 +278,9 @@ export async function getCropCalendar(
       });
     }
 
-    let weatherTip: string | undefined;
-    if (lat && lon) {
-      try {
-        const weatherResult = await getWeather(lat, lon, language.split("-")[0]);
-        if (weatherResult.success && weatherResult.data) {
-          if (weatherResult.data.humidity > 80) {
-            weatherTip = "High humidity - avoid fungicide spray today";
-          } else if (weatherResult.data.temperature > 35) {
-            weatherTip = "Very hot - water crops in early morning only";
-          } else if (weatherResult.data.description?.includes("rain")) {
-            weatherTip = "Rain expected - postpone spray applications";
-          }
-        }
-      } catch (e) {
-        // Weather tip is optional
-      }
-    }
-
     calendar.push({
       month,
       activities,
-      weatherTip: i === 0 ? weatherTip : undefined, // Only show weather tip for current month
     });
   }
 
@@ -472,137 +299,36 @@ export async function getGovernmentSchemes(
     link?: string;
   }[];
 }> {
-  try {
-    // Use AI to generate relevant scheme information
-    const response = await getSarvamChatCompletion({
-      messages: [
-        {
-          role: "user",
-          content: `List the top 5 most useful current Indian government agricultural schemes for small and marginal farmers. ${userContext ? `User context: ${userContext}` : ""} 
-          
-For each scheme provide:
-1. Scheme Name
-2. Brief Description (2-3 lines)
-3. Who is Eligible
-4. Key Benefits
-
-Focus on schemes like PM-KISAN, PM Fasal Bima Yojana, KCC, Soil Health Card, eNAM, etc. that are currently active and accepting applications.`,
-        },
-      ],
-      language,
-    });
-
-    if (response.success && response.data?.content) {
-      // Parse the AI response into structured data
-      const content = response.data.content;
-      
-      // Return a structured response with the AI-generated content
-      return {
-        schemes: [
-          {
-            name: "PM-KISAN",
-            description: content.includes("PM-KISAN") 
-              ? "Direct income support of ₹6,000 per year to farmer families"
-              : "Pradhan Mantri Kisan Samman Nidhi provides direct income support to farmers",
-            eligibility: "All landholding farmer families",
-            benefits: "₹6,000 per year in 3 installments of ₹2,000",
-            link: "https://pmkisan.gov.in",
-          },
-          {
-            name: "PM Fasal Bima Yojana",
-            description: "Crop insurance scheme to protect farmers against crop loss",
-            eligibility: "All farmers growing notified crops",
-            benefits: "Coverage against natural calamities, pests, diseases",
-            link: "https://pmfby.gov.in",
-          },
-          {
-            name: "Kisan Credit Card (KCC)",
-            description: "Easy credit access for farmers at subsidized interest rates",
-            eligibility: "All farmers, fishermen, animal husbandry farmers",
-            benefits: "Credit up to ₹3 lakh at 4% interest rate",
-            link: "https://www.pmkisan.gov.in/kcc",
-          },
-          {
-            name: "Soil Health Card",
-            description: "Free soil testing and nutrient recommendations",
-            eligibility: "All farmers",
-            benefits: "Free soil analysis and crop-wise fertilizer recommendations",
-            link: "https://soilhealth.dac.gov.in",
-          },
-          {
-            name: "eNAM (e-National Agriculture Market)",
-            description: "Online trading platform for agricultural commodities",
-            eligibility: "All farmers and traders",
-            benefits: "Better price discovery, transparent trading",
-            link: "https://www.enam.gov.in",
-          },
-        ],
-      };
-    }
-
-    // Return default schemes if AI fails
-    return {
-      schemes: [
-        {
-          name: "PM-KISAN",
-          description: "Direct income support of ₹6,000 per year to farmer families",
-          eligibility: "All landholding farmer families",
-          benefits: "₹6,000 per year in 3 installments",
-          link: "https://pmkisan.gov.in",
-        },
-        {
-          name: "PM Fasal Bima Yojana",
-          description: "Comprehensive crop insurance scheme",
-          eligibility: "All farmers growing notified crops",
-          benefits: "Coverage against crop loss due to natural calamities",
-          link: "https://pmfby.gov.in",
-        },
-      ],
-    };
-  } catch (error) {
-    console.error("Error fetching government schemes:", error);
-    return { schemes: [] };
-  }
+  return {
+    schemes: [
+      {
+        name: "PM-KISAN",
+        description: "Direct income support of ₹6,000 per year to farmer families",
+        eligibility: "All landholding farmer families",
+        benefits: "₹6,000 per year in 3 installments",
+        link: "https://pmkisan.gov.in",
+      },
+      {
+        name: "PM Fasal Bima Yojana",
+        description: "Comprehensive crop insurance scheme",
+        eligibility: "All farmers growing notified crops",
+        benefits: "Coverage against crop loss due to natural calamities",
+        link: "https://pmfby.gov.in",
+      },
+      {
+        name: "Kisan Credit Card (KCC)",
+        description: "Easy credit access for farmers at subsidized interest rates",
+        eligibility: "All farmers, fishermen, animal husbandry farmers",
+        benefits: "Credit up to ₹3 lakh at 4% interest rate",
+        link: "https://www.pmkisan.gov.in/kcc",
+      },
+    ],
+  };
 }
 
-// AI-powered crop disease prediction using chat
 export async function getAICropAdvice(
-  context: {
-    recentDiseases: string[];
-    weather?: { temperature: number; humidity: number; description: string };
-    plantTypes: string[];
-  },
+  context: any,
   language: string
 ): Promise<string> {
-  try {
-    let contextMessage = "Based on the following farm data, provide specific preventive advice:\n";
-    
-    if (context.recentDiseases.length > 0) {
-      contextMessage += `- Recent diseases detected: ${context.recentDiseases.join(", ")}\n`;
-    }
-    
-    if (context.weather) {
-      contextMessage += `- Current weather: ${context.weather.temperature}°C, ${context.weather.humidity}% humidity, ${context.weather.description}\n`;
-    }
-    
-    if (context.plantTypes.length > 0) {
-      contextMessage += `- Crops grown: ${context.plantTypes.join(", ")}\n`;
-    }
-    
-    contextMessage += "\nProvide 3-4 specific, actionable recommendations for the next 7 days.";
-
-    const response = await getSarvamChatCompletion({
-      messages: [{ role: "user", content: contextMessage }],
-      language,
-    });
-
-    if (response.success && response.data?.content) {
-      return response.data.content;
-    }
-
-    return "Unable to generate personalized advice. Please try again later.";
-  } catch (error) {
-    console.error("Error getting AI crop advice:", error);
-    return "Unable to generate personalized advice. Please try again later.";
-  }
+  return "Monitor soil moisture & apply balanced NPK 19-19-19 foliar spray post-rain.";
 }

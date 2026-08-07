@@ -1,76 +1,75 @@
 "use server";
 
-import { db } from "@/lib/db";
-import { chats } from "@/drizzle/schema";
-import { eq } from "drizzle-orm";
-import { deleteImageFromBlob } from "@/lib/blob-storage";
+import { connectDB } from "@/lib/db";
+import { ChatHistoryModel } from "@/models/ChatHistory";
 
-export interface ChatMessageData {
+export interface StoredMessage {
+  id: string;
   sessionId: string;
   role: "user" | "assistant";
   content: string;
+  imageUrl?: string;
   thinkingText?: string;
   audioBase64?: string;
+  timestamp: Date;
+}
+
+export async function getSessionMessages(sessionId: string): Promise<StoredMessage[]> {
+  try {
+    await connectDB();
+    const result = await ChatHistoryModel.find({ sessionId }).sort({ createdAt: 1 });
+    return result.map((item: any) => ({
+      id: item._id.toString(),
+      sessionId: item.sessionId,
+      role: item.role,
+      content: item.content,
+      imageUrl: item.imageUrl,
+      thinkingText: item.thinkingText,
+      timestamp: item.createdAt,
+    }));
+  } catch (error) {
+    console.error("Failed to fetch messages:", error);
+    return [];
+  }
+}
+
+export async function loadSessionMessages(sessionId: string): Promise<{ success: boolean; messages: StoredMessage[] }> {
+  const messages = await getSessionMessages(sessionId);
+  return { success: true, messages };
+}
+
+export async function saveMessage(params: {
+  userId?: string;
+  sessionId: string;
+  role: "user" | "assistant";
+  content: string;
   imageUrl?: string;
-}
-
-// Save a single message to database
-export async function saveMessage(message: ChatMessageData) {
+  thinkingText?: string;
+}) {
   try {
-    await db.insert(chats).values({
-      sessionId: message.sessionId,
-      role: message.role,
-      content: message.content,
-      thinkingText: message.thinkingText,
-      audioBase64: message.audioBase64,
-      imageUrl: message.imageUrl,
+    await connectDB();
+    const newMsg = await ChatHistoryModel.create({
+      userId: params.userId || "000000000000000000000000",
+      sessionId: params.sessionId,
+      role: params.role,
+      content: params.content,
+      imageUrl: params.imageUrl,
+      thinkingText: params.thinkingText,
     });
-    return { success: true };
+    return { success: true, id: newMsg._id.toString() };
   } catch (error) {
-    console.error("Error saving message:", error);
-    return { success: false, error: String(error) };
+    console.error("Failed to save message:", error);
+    return { success: false, error: "Failed to save message" };
   }
 }
 
-// Load messages for a session from database
-export async function loadSessionMessages(sessionId: string) {
-  try {
-    const messages = await db
-      .select()
-      .from(chats)
-      .where(eq(chats.sessionId, sessionId))
-      .orderBy(chats.timestamp);
-    
-    return { success: true, messages };
-  } catch (error) {
-    console.error("Error loading messages:", error);
-    return { success: false, error: String(error), messages: [] };
-  }
-}
-
-// Delete all messages for a session
 export async function clearSessionMessages(sessionId: string) {
   try {
-    // Get all messages to delete their blob images
-    const messages = await db
-      .select()
-      .from(chats)
-      .where(eq(chats.sessionId, sessionId));
-    
-    // Delete blob images (only if they're blob URLs, not base64)
-    await Promise.all(
-      messages.map((msg) => {
-        if (msg.imageUrl && msg.imageUrl.startsWith("https://") && msg.imageUrl.includes("blob.vercel-storage.com")) {
-          return deleteImageFromBlob(msg.imageUrl);
-        }
-        return Promise.resolve({ success: true });
-      })
-    );
-    
-    await db.delete(chats).where(eq(chats.sessionId, sessionId));
+    await connectDB();
+    await ChatHistoryModel.deleteMany({ sessionId });
     return { success: true };
   } catch (error) {
-    console.error("Error clearing messages:", error);
-    return { success: false, error: String(error) };
+    console.error("Failed to clear messages:", error);
+    return { success: false, error: "Failed to clear messages" };
   }
 }
