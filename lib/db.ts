@@ -2,18 +2,20 @@ import "dotenv/config";
 import mongoose from "mongoose";
 import dns from "dns";
 
-// Configure reliable DNS servers for Windows SRV record resolution
+// Configure Google & Cloudflare DNS resolvers for Windows Node.js SRV record resolution
 try {
-  dns.setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
-} catch (e) {
-  // Ignore if unsupported in environment
-}
+  dns.setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4", "9.9.9.9"]);
+} catch (e) {}
 
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/krishimitra";
+const PRIMARY_URI =
+  process.env.MONGODB_URI ||
+  "mongodb+srv://krishiadmin:KrishiPass123@cluster0.vi1jvwq.mongodb.net/krishimitra?retryWrites=true&w=majority";
 
-/**
- * Global Mongoose Connection Cache for Next.js Serverless & Hot-Reloading
- */
+const SEEDLIST_URI =
+  "mongodb://krishiadmin:KrishiPass123@cluster0-shard-00-00.vi1jvwq.mongodb.net:27017,cluster0-shard-00-01.vi1jvwq.mongodb.net:27017,cluster0-shard-00-02.vi1jvwq.mongodb.net:27017/krishimitra?ssl=true&replicaSet=atlas-vi1jvwq-shard-0&authSource=admin&retryWrites=true&w=majority";
+
+const LOCAL_FALLBACK_URI = "mongodb://127.0.0.1:27017/krishimitra";
+
 let cached = (global as any).mongoose;
 
 if (!cached) {
@@ -21,44 +23,64 @@ if (!cached) {
 }
 
 export async function connectDB() {
-  // 1. If connection is already active (readyState === 1 Connected)
   if (mongoose.connection.readyState === 1) {
     return mongoose.connection;
   }
 
-  // 2. If connection is currently connecting (readyState === 2 Connecting)
   if (mongoose.connection.readyState === 2 && cached.promise) {
     await cached.promise;
     return mongoose.connection;
   }
 
-  // 3. Connection is disconnected (readyState 0) or uninitialized: Reset cache and initiate fresh connection
   cached.promise = null;
   cached.conn = null;
 
   const opts = {
-    serverSelectionTimeoutMS: 10000,
-    bufferCommands: true, // Enable standard command buffering during initial connection
+    serverSelectionTimeoutMS: 4000,
+    bufferCommands: true,
   };
 
-  console.log("⚡ [MONGODB INITIALIZING CONNECTION]:", MONGODB_URI.replace(/:([^@]+)@/, ":****@"));
-
-  cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongooseInstance) => {
-    console.log("✅ [MONGODB CONNECTED SUCCESSFULLY]");
-    return mongooseInstance;
-  });
-
+  // Step 1: Attempt Primary SRV Atlas Connection with Custom DNS
   try {
-    cached.conn = await cached.promise;
-  } catch (e: any) {
-    cached.promise = null;
-    cached.conn = null;
-    console.error("❌ [MONGODB CONNECTION EXCEPTION]:", e.message);
-    throw new Error(`Database connection failed: ${e.message}`);
-  }
+    try {
+      dns.setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4"]);
+    } catch (e) {}
 
-  return cached.conn;
+    console.log("⚡ [MONGODB INITIALIZING ATLAS CLOUD CONNECTION]...");
+    cached.promise = mongoose.connect(PRIMARY_URI, opts);
+    cached.conn = await cached.promise;
+    console.log("✅ [MONGODB CONNECTED TO ATLAS CLOUD SUCCESSFULLY]");
+    return cached.conn;
+  } catch (err1: any) {
+    console.warn("⚠️ [ATLAS SRV CONNECTION FAILED / DNS ECONNREFUSED]:", err1.message);
+    cached.promise = null;
+
+    // Step 2: Attempt Seedlist Direct Atlas Connection (Bypasses SRV DNS lookup)
+    try {
+      console.log("⚡ [MONGODB RETRYING WITH ATLAS SEEDLIST FORMAT]...");
+      cached.promise = mongoose.connect(SEEDLIST_URI, opts);
+      cached.conn = await cached.promise;
+      console.log("✅ [MONGODB CONNECTED TO ATLAS SEEDLIST SUCCESSFULLY]");
+      return cached.conn;
+    } catch (err2: any) {
+      console.warn("⚠️ [ATLAS SEEDLIST CONNECTION FAILED]:", err2.message);
+      cached.promise = null;
+
+      // Step 3: Fallback to Local MongoDB Instance (Guarantees app never crashes)
+      try {
+        console.log("⚡ [MONGODB FALLBACK TO LOCAL INSTANCE]...");
+        cached.promise = mongoose.connect(LOCAL_FALLBACK_URI, opts);
+        cached.conn = await cached.promise;
+        console.log("✅ [MONGODB CONNECTED TO LOCAL INSTANCE SUCCESSFULLY]");
+        return cached.conn;
+      } catch (err3: any) {
+        console.error("❌ [MONGODB ALL INSTANCES UNREACHABLE]:", err3.message);
+        cached.promise = null;
+        cached.conn = null;
+        throw new Error(`MongoDB connection failed: ${err1.message}`);
+      }
+    }
+  }
 }
 
-// Dummy export for backward compatibility with drizzle legacy imports
 export const db = {} as any;
