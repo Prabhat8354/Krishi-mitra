@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { motion } from "framer-motion";
 
 interface MascotProps {
   size?: number;
@@ -8,6 +9,7 @@ interface MascotProps {
 
 export default function InteractiveMascot({ size = 300 }: MascotProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const rectRef = useRef<DOMRect | null>(null);
   
   // Tracking mouse coordinates for smooth eye tracking & head rotation
   const [pupilOffset, setPupilOffset] = useState({ x: 0, y: 0 });
@@ -16,6 +18,8 @@ export default function InteractiveMascot({ size = 300 }: MascotProps) {
   const [isWaving, setIsWaving] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [speechBubble, setSpeechBubble] = useState<string | null>(null);
+
+  const [dragLimits, setDragLimits] = useState({ left: 0, right: 0, top: 0, bottom: 0 });
 
   const speechMessages = [
     "Hello Farmer 👋",
@@ -26,13 +30,46 @@ export default function InteractiveMascot({ size = 300 }: MascotProps) {
     "KrishiMitra AI is ready!"
   ];
 
+  const updateRect = () => {
+    if (containerRef.current) {
+      rectRef.current = containerRef.current.getBoundingClientRect();
+    }
+  };
+
+  const updateDragLimits = () => {
+    if (typeof window === "undefined" || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    setDragLimits({
+      left: -rect.left,
+      right: window.innerWidth - rect.right,
+      top: -rect.top,
+      bottom: window.innerHeight - rect.bottom
+    });
+  };
+
+  useEffect(() => {
+    updateDragLimits();
+    const timer = setTimeout(updateDragLimits, 500);
+
+    window.addEventListener("resize", updateDragLimits);
+    return () => {
+      window.removeEventListener("resize", updateDragLimits);
+      clearTimeout(timer);
+    };
+  }, [size]);
+
   // Eye Tracking & Head Rotation via Mouse Move
   useEffect(() => {
     let animFrameId: number;
 
     const handleMouseMove = (e: MouseEvent) => {
       if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
+      
+      const rect = rectRef.current || containerRef.current.getBoundingClientRect();
+      if (!rectRef.current) {
+        rectRef.current = rect;
+      }
+      
       const centerX = rect.left + rect.width / 2;
       const centerY = rect.top + rect.height / 2;
 
@@ -88,14 +125,27 @@ export default function InteractiveMascot({ size = 300 }: MascotProps) {
   };
 
   return (
-    <div
+    <motion.div
       ref={containerRef}
+      drag
+      dragConstraints={dragLimits}
+      dragMomentum={false}
+      onDragStart={updateRect}
+      onDragEnd={() => {
+        updateRect();
+        updateDragLimits();
+      }}
       onClick={handleClick}
-      onMouseEnter={() => setIsHovered(true)}
+      onMouseEnter={() => {
+        setIsHovered(true);
+        updateRect();
+        updateDragLimits();
+      }}
       onMouseLeave={() => setIsHovered(false)}
-      style={{ width: `${size}px`, height: `${size}px` }}
-      className="relative flex items-center justify-center cursor-pointer select-none group transition-transform duration-300 hover:scale-105"
-      title="Click Mitra to say Hello!"
+      whileHover={{ scale: 1.05 }}
+      style={{ width: `${size}px`, height: `${size}px`, zIndex: 9999 }}
+      className="relative flex items-center justify-center cursor-pointer select-none group"
+      title="Click Mitra to say Hello! (Try dragging me!)"
     >
       {/* SPEECH BUBBLE */}
       {speechBubble && (
@@ -237,6 +287,6 @@ export default function InteractiveMascot({ size = 300 }: MascotProps) {
           <path d="M 97 140 Q 94 130 104 131 Q 101 138 97 140 Z" fill="#16A34A" />
         </svg>
       </div>
-    </div>
+    </motion.div>
   );
 }
