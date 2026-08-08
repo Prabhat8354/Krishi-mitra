@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useStore } from "@/store/useStore";
+import { useTranslation } from "react-i18next";
 import { getLanguageByCode } from "@/lib/languages";
 import KrishiMitraLogo from "@/components/KrishiMitraLogo";
 import InteractiveMascot from "@/components/InteractiveMascot";
@@ -42,6 +43,13 @@ export default function LoginPage() {
   const router = useRouter();
   const { login, register, isAuthenticated, loading: authLoading } = useAuth();
   const { currentLanguage, setLanguage } = useStore();
+  const { t, i18n } = useTranslation();
+
+  useEffect(() => {
+    if (currentLanguage) {
+      i18n.changeLanguage(currentLanguage);
+    }
+  }, [currentLanguage, i18n]);
 
   useEffect(() => {
     const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
@@ -100,11 +108,11 @@ export default function LoginPage() {
   const greetingData = useMemo(() => {
     const hour = new Date().getHours();
     if (hour >= 5 && hour < 12) {
-      return { text: "Good Morning ☀️", sub: "Ready for today's farming insights?" };
+      return { key: "goodMorning", sub: "Ready for today's farming insights?", icon: "☀️" };
     } else if (hour >= 12 && hour < 17) {
-      return { text: "Good Afternoon 🌤️", sub: "Let's check your crop telemetry!" };
+      return { key: "goodAfternoon", sub: "Let's check your crop telemetry!", icon: "🌤️" };
     } else {
-      return { text: "Good Evening <ctrl42>", sub: "Happy Farming & Welcome Back!" };
+      return { key: "goodEvening", sub: "Happy Farming & Welcome Back!", icon: "🌙" };
     }
   }, []);
 
@@ -292,32 +300,38 @@ export default function LoginPage() {
             {/* TIME GREETING BADGE */}
             <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-extrabold shadow-2xs">
               <Sun className="w-4 h-4 text-amber-500" />
-              <span>{greetingData.text} — {greetingData.sub}</span>
+              <span>{t(greetingData.key)} {greetingData.icon} — {greetingData.sub}</span>
             </div>
 
             {/* HERO HEADING & SUBTITLE */}
             <div className="space-y-3">
               <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-gray-900 tracking-tight leading-tight">
-                Welcome to <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-green-600 bg-clip-text text-transparent">KrishiMitra</span>
+                {currentLanguage && currentLanguage !== 'en-IN' ? (
+                  <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-green-600 bg-clip-text text-transparent">{t('welcomeTo')}</span>
+                ) : (
+                  <>
+                    {t('welcomeTo')} <span className="bg-gradient-to-r from-emerald-600 via-teal-600 to-green-600 bg-clip-text text-transparent">KrishiMitra</span>
+                  </>
+                )}
               </h1>
               <p className="text-base md:text-lg text-gray-600 font-medium max-w-xl mx-auto lg:mx-0">
-                India's Intelligent AI Farming Companion powered by Google Gemini AI & Real-Time Agricultural Telemetry.
+                {t('farmingCompanionSubtitle')}
               </p>
             </div>
 
             {/* 4 FLOATING FEATURE BADGES */}
             <div className="flex flex-wrap items-center justify-center lg:justify-start gap-2.5 pt-2">
               <div className="px-3.5 py-2 rounded-2xl bg-white/80 backdrop-blur-md border border-emerald-100 shadow-2xs text-xs font-bold text-gray-800 flex items-center gap-2 hover:scale-105 transition-transform">
-                <Sprout className="w-4 h-4 text-emerald-600" /> AI Crop Doctor
+                <Sprout className="w-4 h-4 text-emerald-600" /> {t('cropDoctor')}
               </div>
               <div className="px-3.5 py-2 rounded-2xl bg-white/80 backdrop-blur-md border border-sky-100 shadow-2xs text-xs font-bold text-gray-800 flex items-center gap-2 hover:scale-105 transition-transform">
-                <CloudRain className="w-4 h-4 text-sky-600" /> Live Weather
+                <CloudRain className="w-4 h-4 text-sky-600" /> {t('weatherDashboard')}
               </div>
               <div className="px-3.5 py-2 rounded-2xl bg-white/80 backdrop-blur-md border border-amber-100 shadow-2xs text-xs font-bold text-gray-800 flex items-center gap-2 hover:scale-105 transition-transform">
-                <TrendingUp className="w-4 h-4 text-amber-600" /> Live Mandi Prices
+                <TrendingUp className="w-4 h-4 text-amber-600" /> {t('mandiMarketRates')}
               </div>
               <div className="px-3.5 py-2 rounded-2xl bg-white/80 backdrop-blur-md border border-purple-100 shadow-2xs text-xs font-bold text-gray-800 flex items-center gap-2 hover:scale-105 transition-transform">
-                <Mic className="w-4 h-4 text-purple-600" /> Voice Assistant
+                <Mic className="w-4 h-4 text-purple-600" /> {t('voiceAssistant')}
               </div>
             </div>
 
@@ -343,7 +357,7 @@ export default function LoginPage() {
                       : "text-gray-500 hover:text-gray-800"
                   }`}
                 >
-                  <LogIn className="w-4 h-4" /> Login
+                  <LogIn className="w-4 h-4" /> {t('login')}
                 </button>
                 <button
                   type="button"
@@ -354,7 +368,7 @@ export default function LoginPage() {
                       : "text-gray-500 hover:text-gray-800"
                   }`}
                 >
-                  <UserPlus className="w-4 h-4" /> Create Account
+                  <UserPlus className="w-4 h-4" /> {t('createAccount')}
                 </button>
               </div>
 
@@ -369,21 +383,21 @@ export default function LoginPage() {
               {activeTab === "login" ? (
                 <form onSubmit={handleLoginSubmit} className="space-y-4">
                   <div>
-                    <label className="text-xs font-bold text-gray-700 block mb-1">Email or Mobile Number</label>
+                    <label className="text-xs font-bold text-gray-700 block mb-1">{t('emailOrPhone')}</label>
                     <div className="relative">
                       <Mail className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
                       <input
                         type="text"
                         value={loginEmailOrPhone}
                         onChange={(e) => setLoginEmailOrPhone(e.target.value)}
-                        placeholder="Enter your email or phone"
+                        placeholder={t('enterEmailOrPhone')}
                         className="w-full pl-10 pr-4 py-3 bg-gray-50/80 border border-gray-200 rounded-2xl text-xs font-medium focus:outline-none focus:border-emerald-600 focus:bg-white transition"
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="text-xs font-bold text-gray-700 block mb-1">Password</label>
+                    <label className="text-xs font-bold text-gray-700 block mb-1">{t('password')}</label>
                     <div className="relative">
                       <Lock className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
                       <input
@@ -411,9 +425,9 @@ export default function LoginPage() {
                         onChange={(e) => setRememberMe(e.target.checked)}
                         className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
                       />
-                      Remember Me
+                      {t('rememberMe')}
                     </label>
-                    <a href="#" className="font-bold text-emerald-700 hover:underline">Forgot Password?</a>
+                    <a href="#" className="font-bold text-emerald-700 hover:underline">{t('forgotPassword')}</a>
                   </div>
 
                   <button
@@ -422,7 +436,7 @@ export default function LoginPage() {
                     className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white font-extrabold text-xs rounded-2xl shadow-md hover:shadow-lg transition transform hover:-translate-y-0.5 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
                   >
                     {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4" />}
-                    Login to Dashboard
+                    {t('loginToDashboard')}
                   </button>
 
                   <div className="relative py-2 text-center">
@@ -435,7 +449,7 @@ export default function LoginPage() {
                     onClick={() => router.push("/dashboard")}
                     className="w-full py-3 bg-gray-50 hover:bg-gray-100 text-gray-800 font-bold text-xs rounded-2xl border border-gray-200 transition flex items-center justify-center gap-2 cursor-pointer"
                   >
-                    Continue as Guest Farmer →
+                    {t('continueAsGuest')}
                   </button>
                 </form>
               ) : (

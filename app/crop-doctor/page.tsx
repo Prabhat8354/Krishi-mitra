@@ -28,6 +28,8 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import MitraMascot from "@/components/MitraMascot";
+import { useStore } from "@/store/useStore";
+import { savePlantAnalysis } from "@/actions/plant-history";
 
 interface DiseaseData {
   cropName: string;
@@ -115,8 +117,129 @@ export default function CropDoctorPage() {
     setIsSaved(false);
   };
 
+  const handleSaveReport = async () => {
+    if (!result || !selectedImage) return;
+    try {
+      const storeState = useStore.getState();
+      const sId = storeState.sessionId || "session";
+
+      const res = await savePlantAnalysis({
+        sessionId: sId,
+        imageUrl: selectedImage,
+        plantName: result.cropName,
+        disease: result.disease,
+        probability: result.confidence,
+        treatment: result.organicTreatment || result.chemicalTreatment || "Standard treatment",
+        symptoms: result.description,
+        prevention: result.preventionTips,
+        isHealthy: result.isHealthy,
+      });
+
+      if (res.success) {
+        setIsSaved(true);
+        alert("Diagnostic Report saved successfully to your farm history!");
+      } else {
+        alert("Failed to save report: " + res.error);
+      }
+    } catch (e: any) {
+      alert("Error saving report: " + e.message);
+    }
+  };
+
   const handleDownloadPDF = () => {
-    alert("Downloading Krishi Mitra Crop Medical Diagnostic Report (PDF)...");
+    if (!result) return;
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      alert("Please allow popups to download/print the diagnostic report.");
+      return;
+    }
+    
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Krishi Mitra Diagnostic Report - \${result.disease}</title>
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #111827; padding: 40px; line-height: 1.6; }
+            .header { border-bottom: 3px solid #059669; padding-bottom: 20px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center; }
+            .logo { font-size: 24px; font-weight: 800; color: #059669; }
+            .title { font-size: 28px; font-weight: 900; margin: 10px 0; color: #111827; }
+            .meta { font-size: 12px; color: #6B7280; margin-bottom: 20px; }
+            .grid { display: grid; grid-template-cols: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
+            .card { border: 1px solid #E5E7EB; border-radius: 12px; padding: 20px; background-color: #F9FAFB; }
+            .card-title { font-size: 16px; font-weight: 700; color: #065F46; margin-top: 0; margin-bottom: 10px; border-bottom: 1px solid #E5E7EB; padding-bottom: 5px; }
+            .card-content { font-size: 14px; color: #374151; }
+            .badge { display: inline-block; padding: 4px 12px; border-radius: 9999px; font-size: 12px; font-weight: 700; text-transform: uppercase; border: 1px solid; }
+            .badge-danger { background-color: #FEF2F2; color: #991B1B; border-color: #FCA5A5; }
+            .badge-success { background-color: #ECFDF5; color: #065F46; border-color: #A7F3D0; }
+            .description { font-size: 15px; color: #1F2937; margin-bottom: 30px; background-color: #F0FDF4; border: 1px dashed #A7F3D0; padding: 15px; border-radius: 8px; }
+            .footer { text-align: center; font-size: 11px; color: #9CA3AF; margin-top: 50px; border-top: 1px solid #E5E7EB; padding-top: 20px; }
+            @media print {
+              body { padding: 20px; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="logo">🌾 Krishi Sathi AI</div>
+            <div class="badge \${result.isHealthy ? "badge-success" : "badge-danger"}">\${result.isHealthy ? "Healthy" : result.severity || "Infected"}</div>
+          </div>
+          
+          <div class="title">Crop Diagnostic Report</div>
+          <div class="meta">
+            <strong>Crop:</strong> \${result.cropName} &nbsp;|&nbsp; 
+            <strong>Disease:</strong> \${result.disease} &nbsp;|&nbsp; 
+            <strong>Confidence:</strong> \${result.confidence}% Match &nbsp;|&nbsp;
+            <strong>Date:</strong> \${new Date().toLocaleDateString("en-IN")}
+          </div>
+
+          <div class="description">
+            <strong>Diagnostic Description:</strong><br/>
+            \${result.description}
+          </div>
+
+          <div class="grid">
+            <div class="card">
+              <div class="card-title">🌿 Organic Solution</div>
+              <div class="card-content">\${result.organicTreatment}</div>
+            </div>
+            
+            <div class="card">
+              <div class="card-title">🧪 Chemical Treatment</div>
+              <div class="card-content">\${result.chemicalTreatment}</div>
+            </div>
+
+            <div class="card">
+              <div class="card-title">🌾 Recommended Fertilizer</div>
+              <div class="card-content">\${result.recommendedFertilizer}</div>
+            </div>
+
+            <div class="card">
+              <div class="card-title">⏱️ Recovery Timeline</div>
+              <div class="card-content">
+                <strong>Pesticide:</strong> \${result.recommendedPesticide}<br/>
+                <strong>Expected Recovery:</strong> \${result.recoveryTime}
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top: 20px;">
+            <div class="card-title">🛡️ Prevention Guidelines</div>
+            <div class="card-content">\${result.preventionTips}</div>
+          </div>
+
+          <div class="footer">
+            Generated by Krishi Sathi Crop Vision Pathology Engine. This is an AI-assisted diagnostic sheet.
+          </div>
+
+          <script>
+            window.onload = function() {
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   const handleShare = () => {
@@ -268,10 +391,11 @@ export default function CropDoctorPage() {
                 </button>
 
                 <button
-                  onClick={() => setIsSaved(!isSaved)}
+                  onClick={handleSaveReport}
+                  disabled={isSaved}
                   className={`h-[52px] px-5 rounded-xl text-xs font-bold transition flex items-center gap-2 border ${
                     isSaved
-                      ? "bg-amber-100 text-amber-900 border-amber-300"
+                      ? "bg-amber-100 text-amber-900 border-amber-300 cursor-not-allowed"
                       : "bg-gray-50 text-gray-800 border-gray-200 hover:bg-gray-100"
                   }`}
                 >
@@ -452,10 +576,16 @@ export default function CropDoctorPage() {
               </button>
 
               <button
-                onClick={() => setIsSaved(!isSaved)}
-                className="h-[52px] px-5 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-800 border border-gray-200 text-xs font-bold transition flex items-center gap-2"
+                onClick={handleSaveReport}
+                disabled={isSaved}
+                className={`h-[52px] px-5 rounded-xl text-xs font-bold transition flex items-center gap-2 border ${
+                  isSaved
+                    ? "bg-amber-100 text-amber-900 border-amber-300 cursor-not-allowed"
+                    : "bg-gray-50 text-gray-800 border-gray-200 hover:bg-gray-100"
+                }`}
               >
-                <Bookmark className="w-4 h-4 text-gray-500" /> Save History
+                <Bookmark className={`w-4 h-4 ${isSaved ? "text-amber-500 fill-amber-500" : "text-gray-500"}`} />
+                {isSaved ? "Saved" : "Save History"}
               </button>
 
               <button

@@ -7,14 +7,15 @@ try {
   dns.setServers(["8.8.8.8", "1.1.1.1", "8.8.4.4", "9.9.9.9"]);
 } catch (e) {}
 
+const LOCAL_FALLBACK_URI = "mongodb://127.0.0.1:27017/krishimitra";
+
 const PRIMARY_URI =
   process.env.MONGODB_URI ||
-  "mongodb+srv://krishiadmin:KrishiPass123@cluster0.vi1jvwq.mongodb.net/krishimitra?retryWrites=true&w=majority";
+  LOCAL_FALLBACK_URI;
 
 const SEEDLIST_URI =
-  "mongodb://krishiadmin:KrishiPass123@cluster0-shard-00-00.vi1jvwq.mongodb.net:27017,cluster0-shard-00-01.vi1jvwq.mongodb.net:27017,cluster0-shard-00-02.vi1jvwq.mongodb.net:27017/krishimitra?ssl=true&replicaSet=atlas-vi1jvwq-shard-0&authSource=admin&retryWrites=true&w=majority";
-
-const LOCAL_FALLBACK_URI = "mongodb://127.0.0.1:27017/krishimitra";
+  process.env.MONGODB_SEEDLIST_URI ||
+  LOCAL_FALLBACK_URI;
 
 let cached = (global as any).mongoose;
 

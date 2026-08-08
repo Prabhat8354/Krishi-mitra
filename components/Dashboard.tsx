@@ -19,6 +19,20 @@ import {
 import ProfileHeader from "./ProfileHeader";
 import MitraMascot from "./MitraMascot";
 
+const GREETINGS_MAP: Record<string, string> = {
+  "hi-IN": "नमस्ते",
+  "pa-IN": "ਸਤਿ ਸ਼੍ਰੀ ਅਕਾਲ",
+  "en-IN": "Hello",
+  "mr-IN": "नमस्कार",
+  "bn-IN": "নমস্কার",
+  "ta-IN": "வணக்கம்",
+  "te-IN": "నమస్కారం",
+  "gu-IN": "નમસ્તે",
+  "kn-IN": "ನಮಸ್ಕಾರ",
+  "ml-IN": "നമസ്കാരം",
+  "or-IN": "ନମସ୍କାର",
+};
+
 export default function Dashboard() {
   const { t, i18n } = useTranslation();
   const currentLanguage = useStore((state) => state.currentLanguage);
@@ -131,7 +145,7 @@ export default function Dashboard() {
                 </div>
                 
                 <h1 className="text-2xl md:text-3xl font-extrabold text-gray-900 tracking-tight">
-                  👋 Namaste, {profile.name ? profile.name.split(" ")[0] : "Farmer"}!
+                  👋 {GREETINGS_MAP[currentLanguage] || "Namaste"}, {profile.name ? profile.name.split(" ")[0] : "Farmer"}!
                 </h1>
 
                 <p className="text-xs text-gray-700 leading-relaxed font-medium max-w-xl">

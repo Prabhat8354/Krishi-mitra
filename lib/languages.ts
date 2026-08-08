@@ -2,6 +2,7 @@ export interface Language {
   code: string; // BCP-47 code (e.g., "hi-IN")
   name: string; // Native name
   englishName: string;
+  greeting?: string; // Native greeting (e.g. Namaste, Sat Sri Akal)
   sarvamCode: string; // Code used for Sarvam API
   browserCode: string; // Code for browser speechSynthesis
   greetings: {

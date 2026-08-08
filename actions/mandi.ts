@@ -1,5 +1,8 @@
 "use server";
 
+import { connectDB } from "@/lib/db";
+import { MandiPriceModel } from "@/models/MandiPrice";
+
 export interface MandiPriceItem {
   id: string;
   crop: string;
@@ -91,11 +94,32 @@ export async function getLiveMandiPrices(farmerState: string = "Punjab", farmerD
           return bMatch - aMatch;
         });
 
+        // Cache the newly fetched items in MongoDB
+        try {
+          await connectDB();
+          for (const item of items) {
+            await MandiPriceModel.findOneAndUpdate(
+              {
+                state: item.state,
+                district: item.district,
+                crop: item.crop,
+                mandiName: item.mandiName,
+              },
+              { $set: item },
+              { upsert: true, new: true }
+            );
+          }
+          console.log(`✅ [MANDI PRICE CACHE]: Successfully cached ${items.length} items to MongoDB.`);
+        } catch (dbErr: any) {
+          console.error("⚠️ [MANDI PRICE CACHE ERROR]: Failed to cache rates to MongoDB:", dbErr.message);
+        }
+
         return {
           success: true,
           data: items,
           total: items.length,
           fetchedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          sourceUsed: "Official Agmarknet Mandi Stream",
         };
       }
     }
@@ -103,7 +127,32 @@ export async function getLiveMandiPrices(farmerState: string = "Punjab", farmerD
     console.error("❌ Live Mandi API fetch error:", error);
   }
 
-  // If API unavailable, return explicit failure state (NO fake static data)
+  // Fallback: If API fails, try to serve cached results from MongoDB
+  try {
+    console.log("⚡ [MANDI PRICE CACHE FALLBACK]: Attempting to fetch cached rates from MongoDB...");
+    await connectDB();
+    const cachedRecords = await MandiPriceModel.find({
+      $or: [
+        { state: new RegExp(farmerState, "i") },
+        { district: new RegExp(farmerDistrict, "i") },
+      ],
+    }).sort({ updatedAt: -1 }).limit(12);
+
+    if (cachedRecords && cachedRecords.length > 0) {
+      console.log(`✅ [MANDI PRICE CACHE FALLBACK SUCCESS]: Loaded ${cachedRecords.length} cached items.`);
+      return {
+        success: true,
+        data: cachedRecords.map((r: any) => r.toObject() as unknown as MandiPriceItem),
+        total: cachedRecords.length,
+        fetchedAt: "Cached (Offline)",
+        sourceUsed: "MongoDB Local Cache fallback",
+      };
+    }
+  } catch (dbErr: any) {
+    console.error("❌ [MANDI PRICE CACHE FALLBACK FAILED]:", dbErr.message);
+  }
+
+  // If API unavailable and cache empty/unavailable, return explicit failure state
   return {
     success: false,
     error: "Live mandi data temporarily unavailable. Please verify connection.",
