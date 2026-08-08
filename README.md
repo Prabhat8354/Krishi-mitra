@@ -1,7 +1,7 @@
-![OG Image](public/og.webp)
-# AI Agricultural Advisor
 
-A multilingual AI advisory system for farmers in India, built with Next.js 14+, featuring voice input, image analysis, and AI-powered agricultural guidance.
+# Krishi Sathi (Krishi Mitra)
+
+A multilingual AI advisory system for farmers in India, built with Next.js 16+ (App Router), featuring voice input, image analysis, and AI-powered agricultural guidance.
 
 ## Features
 
@@ -23,7 +23,7 @@ A multilingual AI advisory system for farmers in India, built with Next.js 14+, 
 - **Framework**: Next.js 16.0.10 (App Router)
 - **Styling**: Tailwind CSS 4
 - **State Management**: Zustand
-- **Database**: Neon Postgres + Drizzle ORM
+- **Database**: MongoDB + Mongoose
 - **AI Services**:
   - Sarvam AI (Chat + TTS)
   - Kindwise (Plant.id & Crop.health)
@@ -36,7 +36,7 @@ A multilingual AI advisory system for farmers in India, built with Next.js 14+, 
 - Node.js 18+ 
 - npm or yarn
 - API Keys (required):
-  - Neon Postgres Database
+  - MongoDB Connection Strings (local or Atlas)
   - Sarvam AI API Key
   - Kindwise API Keys (Plant.id & Crop.health)
   - OpenWeather API Key
@@ -47,7 +47,7 @@ A multilingual AI advisory system for farmers in India, built with Next.js 14+, 
 
 ```bash
 git clone <repository-url>
-cd farmer
+cd krishisathi
 npm install
 ```
 
@@ -56,10 +56,9 @@ npm install
 Create a `.env.local` file in the root directory with the following:
 
 ```env
-# Database (Neon Postgres)
-DATABASE_URL="postgresql://..."
-POSTGRES_URL="postgresql://..."
-POSTGRES_URL_NON_POOLING="postgresql://..."
+# Database (MongoDB)
+MONGODB_URI="mongodb+srv://..."
+MONGODB_SEEDLIST_URI="mongodb+srv://..."
 
 # API Keys
 SARVAM_API_KEY="your_sarvam_api_key"
@@ -71,15 +70,7 @@ OPENWEATHER_API_KEY="your_openweather_api_key"
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
 ```
 
-### 3. Database Setup
-
-Push the schema to your Neon database:
-
-```bash
-npm run db:push
-```
-
-### 4. Development
+### 3. Development
 
 Run the development server:
 
@@ -89,7 +80,7 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-### 5. Build for Production
+### 4. Build for Production
 
 ```bash
 npm run build
@@ -99,7 +90,7 @@ npm start
 ## Project Structure
 
 ```
-farmer/
+krishisathi/
 ├── actions/          # Server Actions (API integrations)
 │   ├── weather.ts
 │   ├── analyze-image.ts
@@ -118,8 +109,11 @@ farmer/
 │   │   └── SpeakingButton.tsx
 │   ├── LanguageSelector.tsx
 │   └── WeatherWidget.tsx
-├── drizzle/          # Database Schema
-│   └── schema.ts
+├── models/           # Mongoose Models
+│   ├── ChatHistory.ts
+│   ├── DiseaseDetection.ts
+│   ├── MandiPrice.ts
+│   └── User.ts
 ├── hooks/            # Custom React Hooks
 │   └── useChat.ts
 ├── lib/              # Utilities
@@ -172,20 +166,41 @@ Fetches local weather and includes in LLM prompt for contextual advice.
 
 ## Database Schema
 
-**chats** table:
-- id (UUID)
-- session_id (Text)
-- role (user | assistant)
-- content (Text)
-- audio_base64 (Text, optional)
-- image_url (Text, optional)
-- timestamp (Timestamp)
+**users** collection:
+- name (String)
+- email (String)
+- phone (String)
+- password (String)
+- preferredLanguage (String)
+- state (String)
+- district (String)
+- farmSize (String)
+- primaryCrop (String)
 
-**user_settings** table:
-- session_id (Text, PK)
-- language (Text)
-- lat (Text)
-- lon (Text)
+**chathistories** collection:
+- userId (ObjectId, ref: User)
+- sessionId (String)
+- role (user | assistant)
+- content (String)
+- imageUrl (String, optional)
+- thinkingText (String, optional)
+
+**diseasedetections** collection:
+- userId (ObjectId, ref: User)
+- imageUrl (String)
+- disease (String)
+- confidence (Number)
+- treatment (String)
+- symptoms (String, optional)
+- prevention (String, optional)
+
+**mandiprices** collection:
+- state (String)
+- district (String)
+- crop (String)
+- mandiName (String)
+- priceRecords (Array)
+- lastUpdated (Date)
 
 ## Scripts
 
@@ -194,8 +209,7 @@ npm run dev          # Development server
 npm run build        # Production build
 npm run start        # Production server
 npm run lint         # ESLint
-npm run db:push      # Push schema to database
-npm run db:studio    # Open Drizzle Studio
+npm run db:clear     # Clear local mock records
 ```
 
 ## Deployment
