@@ -10,6 +10,11 @@ async function clearDatabase() {
     console.log("⚡ Connecting to MongoDB...");
     await connectDB();
 
+    if (!mongoose.connection.db) {
+      console.log("ℹ️ No active MongoDB database connection.");
+      process.exit(0);
+    }
+
     const collections = await mongoose.connection.db.collections();
     
     if (collections.length === 0) {

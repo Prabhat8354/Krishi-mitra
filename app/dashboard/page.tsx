@@ -17,13 +17,20 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    // If DEMO_MODE is true or user is not authenticated after loading completes
     const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
-    if (mounted && !loading && !isAuthenticated && !isDemoMode) {
-      router.push("/login");
+    if (mounted && !loading) {
+      console.log("AUTH: Dashboard auth check started");
+      console.log("AUTH: Dashboard auth check completed");
+      console.log("AUTH: User authenticated =", isAuthenticated);
+
+      if (!isAuthenticated && !isDemoMode) {
+        console.log("AUTH: Unauthenticated access attempt to /dashboard. Redirecting to /login...");
+        router.push("/login");
+      }
     }
   }, [mounted, loading, isAuthenticated, router]);
 
+  // Loading state guard: Never render login interface or assume unauthenticated while auth is initializing
   if (!mounted || loading) {
     return (
       <div className="min-h-screen bg-[#F8FAF7] flex items-center justify-center">
@@ -35,6 +42,7 @@ export default function DashboardPage() {
     );
   }
 
+  // Render Dashboard cleanly once authentication is confirmed
   return (
     <OnboardingFlowManager>
       <Dashboard />

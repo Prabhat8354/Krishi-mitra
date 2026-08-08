@@ -71,6 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [setStoreProfile, setStoreLanguage]);
 
   const checkAuth = useCallback(async (): Promise<boolean> => {
+    console.log("AUTH: Dashboard auth check started");
     setLoading(true);
     try {
       const res = await fetch("/api/auth/me", { method: "GET" });
@@ -78,18 +79,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (res.ok && data.success && data.authenticated && data.user) {
         syncUserToStore(data.user);
+        console.log("AUTH: Dashboard auth check completed");
+        console.log("AUTH: User authenticated = true");
         setLoading(false);
         return true;
       } else {
         setUser(null);
         setIsAuthenticated(false);
+        console.log("AUTH: Dashboard auth check completed");
+        console.log("AUTH: User authenticated = false");
         setLoading(false);
         return false;
       }
     } catch (error) {
-      console.error("❌ Auth Verification Error:", error);
+      console.error("❌ AUTH Verification Error:", error);
       setUser(null);
       setIsAuthenticated(false);
+      console.log("AUTH: Dashboard auth check completed");
+      console.log("AUTH: User authenticated = false");
       setLoading(false);
       return false;
     }
@@ -100,6 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [checkAuth]);
 
   const login = async (emailOrPhone: string, password: string) => {
+    console.log("AUTH: Login request started");
     setLoading(true);
     try {
       const res = await fetch("/api/auth/login", {
@@ -110,9 +118,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await res.json();
 
       if (res.ok && data.success && data.user) {
+        console.log("AUTH: Login successful");
+        console.log("AUTH: Token/session persisted");
         syncUserToStore(data.user);
-        setLoading(false);
-        return { success: true };
+        console.log("AUTH: Auth state updated");
+
+        // Confirm session verification via backend /api/auth/me BEFORE returning to navigate
+        const isVerified = await checkAuth();
+        if (isVerified) {
+          console.log("AUTH: Navigating to dashboard");
+          return { success: true };
+        } else {
+          console.error("AUTH: Login succeeded but session verification failed.");
+          return { success: false, error: "Session verification failed after login." };
+        }
       } else {
         setLoading(false);
         return { success: false, error: data.error || "Login failed" };
@@ -124,6 +143,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const register = async (formData: any) => {
+    console.log("AUTH: Registration request started");
     setLoading(true);
     try {
       const res = await fetch("/api/auth/register", {
@@ -134,9 +154,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await res.json();
 
       if (res.ok && data.success && data.user) {
+        console.log("AUTH: Registration successful");
+        console.log("AUTH: Token/session persisted");
         syncUserToStore(data.user);
-        setLoading(false);
-        return { success: true };
+        console.log("AUTH: Auth state updated");
+
+        // Confirm session verification via backend /api/auth/me BEFORE returning to navigate
+        const isVerified = await checkAuth();
+        if (isVerified) {
+          console.log("AUTH: Navigating to dashboard");
+          return { success: true };
+        } else {
+          console.error("AUTH: Registration succeeded but session verification failed.");
+          return { success: false, error: "Session verification failed after account creation." };
+        }
       } else {
         setLoading(false);
         return { success: false, error: data.error || "Registration failed" };
