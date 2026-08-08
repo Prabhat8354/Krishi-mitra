@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
-import OnboardingFlowManager from "@/components/onboarding/OnboardingFlowManager";
 import { useAuth } from "@/context/AuthContext";
 import { Loader2 } from "lucide-react";
 
@@ -42,10 +41,6 @@ export default function DashboardPage() {
     );
   }
 
-  // Render Dashboard cleanly once authentication is confirmed
-  return (
-    <OnboardingFlowManager>
-      <Dashboard />
-    </OnboardingFlowManager>
-  );
+  // Render Dashboard directly without OnboardingFlowManager intercepting the layout
+  return <Dashboard />;
 }
