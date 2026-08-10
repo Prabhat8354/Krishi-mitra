@@ -54,6 +54,19 @@ export default function ProfilePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (formData.email && !emailRegex.test(formData.email.trim())) {
+      alert("Please enter a valid email address.");
+      return;
+    }
+
+    const phoneRegex = /^(?:\+91|91|0)?[6-9]\d{9}$/;
+    if (formData.phone && !phoneRegex.test(formData.phone.trim())) {
+      alert("Please enter a valid 10-digit Indian phone number.");
+      return;
+    }
+
     setProfile(formData);
 
     await updateProfile({

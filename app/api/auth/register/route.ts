@@ -40,6 +40,22 @@ export async function POST(req: Request) {
       );
     }
 
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      return NextResponse.json(
+        { success: false, error: "Please enter a valid email address." },
+        { status: 400 }
+      );
+    }
+
+    const phoneRegex = /^(?:\+91|91|0)?[6-9]\d{9}$/;
+    if (!phoneRegex.test(phone.trim())) {
+      return NextResponse.json(
+        { success: false, error: "Please enter a valid 10-digit Indian phone number." },
+        { status: 400 }
+      );
+    }
+
     if (password.length < 6) {
       return NextResponse.json(
         { success: false, error: "Password must be at least 6 characters long." },
@@ -47,21 +63,28 @@ export async function POST(req: Request) {
       );
     }
 
+    if (farmSize !== undefined && (isNaN(Number(farmSize)) || Number(farmSize) <= 0)) {
+      return NextResponse.json(
+        { success: false, error: "Farm area must be a positive number." },
+        { status: 400 }
+      );
+    }
+
     const cleanEmail = email.toLowerCase().trim();
     const cleanPhone = phone.trim();
 
-    // Check existing email/phone uniqueness in MongoDB
-    const existingUser = await UserModel.findOne({
-      $or: [{ email: cleanEmail }, { phone: cleanPhone }],
-    });
+    // Check existing email uniqueness in MongoDB
+    const emailExists = await UserModel.findOne({ email: cleanEmail });
+    if (emailExists) {
+      return NextResponse.json(
+        { success: false, error: "An account with this email address already exists." },
+        { status: 400 }
+      );
+    }
 
-    if (existingUser) {
-      if (existingUser.email === cleanEmail) {
-        return NextResponse.json(
-          { success: false, error: "An account with this email address already exists." },
-          { status: 400 }
-        );
-      }
+    // Check existing phone uniqueness in MongoDB
+    const phoneExists = await UserModel.findOne({ phone: cleanPhone });
+    if (phoneExists) {
       return NextResponse.json(
         { success: false, error: "An account with this phone number already exists." },
         { status: 400 }

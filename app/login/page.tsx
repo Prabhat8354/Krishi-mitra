@@ -198,6 +198,16 @@ export default function LoginPage() {
         setErrorMsg("Please fill in all required fields (Name, Email, Phone, Password).");
         return;
       }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(regForm.email.trim())) {
+        setErrorMsg("Please enter a valid email address.");
+        return;
+      }
+      const phoneRegex = /^(?:\+91|91|0)?[6-9]\d{9}$/;
+      if (!phoneRegex.test(regForm.phone.trim())) {
+        setErrorMsg("Please enter a valid 10-digit phone number.");
+        return;
+      }
       if (regForm.password.length < 6) {
         setErrorMsg("Password must be at least 6 characters long.");
         return;
@@ -220,6 +230,10 @@ export default function LoginPage() {
     if (registerStep === 3) {
       if (!regForm.farmSize.trim() || !regForm.primaryCrop.trim()) {
         setErrorMsg("Please provide your farm size and primary crops.");
+        return;
+      }
+      if (isNaN(Number(regForm.farmSize)) || Number(regForm.farmSize) <= 0) {
+        setErrorMsg("Farm area must be a positive number.");
         return;
       }
     }
@@ -641,6 +655,8 @@ export default function LoginPage() {
                           <label className="text-xs font-bold text-gray-700 block mb-1">Farm Area *</label>
                           <input
                             type="number"
+                            min="0.1"
+                            step="any"
                             value={regForm.farmSize}
                             onChange={(e) => setRegForm({ ...regForm, farmSize: e.target.value })}
                             placeholder="e.g. 5"

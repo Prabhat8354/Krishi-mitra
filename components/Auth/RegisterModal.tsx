@@ -65,6 +65,16 @@ export default function RegisterModal({ isOpen, onClose, onSwitchToLogin }: Regi
         setErrorMsg("Please fill in all required account fields.");
         return;
       }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(formData.email.trim())) {
+        setErrorMsg("Please enter a valid email address.");
+        return;
+      }
+      const phoneRegex = /^(?:\+91|91|0)?[6-9]\d{9}$/;
+      if (!phoneRegex.test(formData.phone.trim())) {
+        setErrorMsg("Please enter a valid 10-digit phone number.");
+        return;
+      }
       if (formData.password.length < 6) {
         setErrorMsg("Password must be at least 6 characters long.");
         return;
@@ -79,6 +89,10 @@ export default function RegisterModal({ isOpen, onClose, onSwitchToLogin }: Regi
     if (step === 2) {
       if (!formData.state.trim() || !formData.district.trim() || !formData.village.trim()) {
         setErrorMsg("Please provide your location details.");
+        return;
+      }
+      if (!formData.farmSize.trim() || isNaN(Number(formData.farmSize)) || Number(formData.farmSize) <= 0) {
+        setErrorMsg("Farm area must be a positive number.");
         return;
       }
     }
@@ -258,6 +272,8 @@ export default function RegisterModal({ isOpen, onClose, onSwitchToLogin }: Regi
                 <input
                   type="number"
                   name="farmSize"
+                  min="0.1"
+                  step="any"
                   value={formData.farmSize}
                   onChange={handleChange}
                   className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium focus:outline-none focus:border-emerald-600"
