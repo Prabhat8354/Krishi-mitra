@@ -24,20 +24,40 @@ export async function GET() {
       );
     }
 
-    await connectDB();
-    const user = await UserModel.findById(payload.userId).select("-password");
+    let userObj;
+    if (payload.userId === "guest_farmer") {
+      userObj = {
+        _id: "guest_farmer",
+        name: "Guest Farmer",
+        email: "guest@krishimitra.com",
+        phone: "0000000000",
+        role: "Farmer",
+        state: "Punjab",
+        district: "Ludhiana",
+        village: "Samrala",
+        farmSize: 5,
+        farmSizeUnit: "Acres",
+        primaryCrop: "Wheat, Rice, Tomato",
+        preferredLanguage: "hi-IN",
+        voiceLanguage: "hi-IN",
+      };
+    } else {
+      await connectDB();
+      const user = await UserModel.findById(payload.userId).select("-password");
 
-    if (!user) {
-      return NextResponse.json(
-        { success: false, authenticated: false, error: "User account not found" },
-        { status: 404 }
-      );
+      if (!user) {
+        return NextResponse.json(
+          { success: false, authenticated: false, error: "User account not found" },
+          { status: 404 }
+        );
+      }
+      userObj = user.toObject();
     }
 
     return NextResponse.json({
       success: true,
       authenticated: true,
-      user: user.toObject(),
+      user: userObj,
     });
   } catch (error: any) {
     console.error("❌ Auth Me API Error:", error);

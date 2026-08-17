@@ -41,7 +41,7 @@ import InteractiveMascot from "@/components/InteractiveMascot";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login, register, isAuthenticated, loading: authLoading } = useAuth();
+  const { login, register, isAuthenticated, loading: authLoading, checkAuth } = useAuth();
   const { currentLanguage, setLanguage } = useStore();
   const { t, i18n } = useTranslation();
 
@@ -186,6 +186,27 @@ export default function LoginPage() {
       router.push("/dashboard");
     } else {
       setErrorMsg(res.error || "Authentication failed. Please check credentials.");
+    }
+  };
+
+  const handleGuestLogin = async () => {
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch("/api/auth/guest", {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (data.success) {
+        await checkAuth();
+        router.push("/dashboard");
+      } else {
+        setErrorMsg(data.error || "Guest login failed.");
+      }
+    } catch (e: any) {
+      setErrorMsg("Network error during guest login.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -460,8 +481,9 @@ export default function LoginPage() {
 
                   <button
                     type="button"
-                    onClick={() => router.push("/dashboard")}
-                    className="w-full py-3 bg-gray-50 hover:bg-gray-100 text-gray-800 font-bold text-xs rounded-2xl border border-gray-200 transition flex items-center justify-center gap-2 cursor-pointer"
+                    onClick={handleGuestLogin}
+                    disabled={loading}
+                    className="w-full py-3 bg-gray-50 hover:bg-gray-100 text-gray-800 font-bold text-xs rounded-2xl border border-gray-200 transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                   >
                     {t('continueAsGuest')}
                   </button>
