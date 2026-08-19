@@ -192,9 +192,58 @@ export default function LoginPage() {
   const handleGuestLogin = async () => {
     setLoading(true);
     setErrorMsg(null);
+
+    let locationData = {
+      state: "Punjab",
+      district: "Ludhiana",
+      village: "Samrala",
+    };
+
+    const getGPSCoordinates = (): Promise<GeolocationPosition> => {
+      return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+          reject(new Error("Geolocation not supported"));
+        } else {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            timeout: 5000,
+            enableHighAccuracy: true,
+          });
+        }
+      });
+    };
+
+    try {
+      const pos = await getGPSCoordinates();
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+
+      const geoRes = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`
+      );
+      const data = await geoRes.json();
+
+      if (data && data.address) {
+        locationData.state = data.address.state || data.address.region || "Punjab";
+        locationData.district =
+          data.address.state_district ||
+          data.address.county ||
+          data.address.city ||
+          "Ludhiana";
+        locationData.village =
+          data.address.village ||
+          data.address.town ||
+          data.address.suburb ||
+          "Samrala";
+      }
+    } catch (err) {
+      console.warn("Could not retrieve current location for guest, using fallback:", err);
+    }
+
     try {
       const res = await fetch("/api/auth/guest", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(locationData),
       });
       const data = await res.json();
       if (data.success) {

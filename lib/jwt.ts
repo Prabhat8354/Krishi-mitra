@@ -7,6 +7,9 @@ export interface JWTPayload {
   email: string;
   phone: string;
   role: string;
+  state?: string;
+  district?: string;
+  village?: string;
 }
 
 export function signJWT(payload: JWTPayload): string {

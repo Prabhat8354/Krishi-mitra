@@ -1,13 +1,29 @@
 import { NextResponse } from "next/server";
 import { signJWT } from "@/lib/jwt";
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
+    let state = "Punjab";
+    let district = "Ludhiana";
+    let village = "Samrala";
+
+    try {
+      const body = await req.json();
+      if (body.state) state = body.state;
+      if (body.district) district = body.district;
+      if (body.village) village = body.village;
+    } catch (e) {
+      // Body might be empty
+    }
+
     const token = signJWT({
       userId: "guest_farmer",
       email: "guest@krishimitra.com",
       phone: "0000000000",
       role: "Farmer",
+      state,
+      district,
+      village,
     });
 
     const response = NextResponse.json({
